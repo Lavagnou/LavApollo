@@ -302,6 +302,7 @@
     "port": "Порт",
     "port_alert_1": "Apollo не може да използва портове с номера по-малки 1024!",
     "port_alert_2": "Не могат да се ползват портове с номера по-големи от 65535!",
+    "port_alert_ephemeral": "Ports at or above 49152 are inside the Windows ephemeral range and may be reserved by Hyper-V, WSL2, Docker or WinNAT at every boot. If streaming fails after a reboot, pick a base port below 49152. Check with: netsh int ipv4 show excludedportrange protocol=tcp",
     "port_desc": "Задаване на групата от портове, които да се използват от Apollo",
     "port_http_port_note": "Използвайте този порт, за да се свържете с Moonlight.",
     "port_note": "Бележка",

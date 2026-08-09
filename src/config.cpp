@@ -1312,6 +1312,18 @@ namespace config {
     int_between_f(vars, "port"s, port, {1024 + nvhttp::PORT_HTTPS, 65535 - rtsp_stream::RTSP_SETUP_PORT});
     sunshine.port = (std::uint16_t) port;
 
+#ifdef _WIN32
+    // The Windows ephemeral range (>= 49152) is reserved dynamically by Hyper-V, WSL2, Docker and
+    // WinNAT at every boot, so a base port there can bind for weeks then fail after a plain reboot.
+    // Warn early (even when the ports currently bind) so the risk shows up in /api/logs.
+    if (sunshine.port >= 49152) {
+      BOOST_LOG(warning) << "Configured base port "sv << sunshine.port
+                         << " is inside the Windows ephemeral range (>= 49152); Windows may reserve "
+                            "the derived streaming ports at each boot. Inspect with: "
+                            "netsh int ipv4 show excludedportrange protocol=tcp"sv;
+    }
+#endif
+
     string_restricted_f(vars, "address_family", sunshine.address_family, {"ipv4"sv, "both"sv});
 
     bool upnp = false;

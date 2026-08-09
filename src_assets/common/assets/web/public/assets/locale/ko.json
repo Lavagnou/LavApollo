@@ -302,6 +302,7 @@
     "port": "포트",
     "port_alert_1": "Apollo은 1024 이하의 포트를 사용할 수 없습니다, 다시 확인하세요.",
     "port_alert_2": "65535 이상의 포트는 사용할 수 없습니다, 다시 확인하세요.",
+    "port_alert_ephemeral": "Ports at or above 49152 are inside the Windows ephemeral range and may be reserved by Hyper-V, WSL2, Docker or WinNAT at every boot. If streaming fails after a reboot, pick a base port below 49152. Check with: netsh int ipv4 show excludedportrange protocol=tcp",
     "port_desc": "Apollo에서 사용하는 포트 제품군 설정",
     "port_http_port_note": "이 포트를 사용하여 Moonlight에 연결하세요.",
     "port_note": "참고",

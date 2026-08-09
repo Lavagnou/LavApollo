@@ -303,6 +303,7 @@
     "port": "Port",
     "port_alert_1": "Apollo ne peut pas utiliser les ports inférieurs à 1024 !",
     "port_alert_2": "Les ports supérieurs à 65535 ne sont pas disponibles !",
+    "port_alert_ephemeral": "Ports at or above 49152 are inside the Windows ephemeral range and may be reserved by Hyper-V, WSL2, Docker or WinNAT at every boot. If streaming fails after a reboot, pick a base port below 49152. Check with: netsh int ipv4 show excludedportrange protocol=tcp",
     "port_desc": "Définir la famille de ports utilisés par Apollo",
     "port_http_port_note": "Utilisez ce port pour vous connecter avec Moonlight.",
     "port_note": "Note ",

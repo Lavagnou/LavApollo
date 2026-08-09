@@ -4,6 +4,7 @@
  */
 // standard includes
 #include <algorithm>
+#include <cerrno>
 #include <sstream>
 
 // local includes
@@ -194,6 +195,131 @@ namespace net {
     }
 
     return mapped_port;
+  }
+
+  namespace {
+    // Canonical streaming port layout, as offsets from the base port. Kept as raw
+    // ints here so network.cpp does not need to include the streaming headers
+    // (nvhttp.h, confighttp.h, rtsp.h, stream.h) and stay self-contained. Source
+    // of truth for the values: those headers' PORT_* / RTSP_SETUP_PORT constants.
+    //   base-5  TCP  HTTPS streaming     (nvhttp::PORT_HTTPS)
+    //   base+0  TCP  HTTP streaming      (nvhttp::PORT_HTTP)
+    //   base+1  TCP  Web UI              (confighttp::PORT_HTTPS)
+    //   base+21 TCP  RTSP setup          (rtsp_stream::RTSP_SETUP_PORT)
+    //   base+9  UDP  video               (stream::VIDEO_STREAM_PORT)
+    //   base+10 UDP  control (+ mic)     (stream::CONTROL_PORT)
+    //   base+11 UDP  audio               (stream::AUDIO_STREAM_PORT)
+    struct port_spec_t {
+      int delta;
+      const char *proto;
+      const char *role;
+    };
+    constexpr port_spec_t kStreamingPorts[] = {
+      {-5, "TCP", "HTTPS streaming (nvhttp)"},
+      {0, "TCP", "HTTP streaming (nvhttp)"},
+      {1, "TCP", "Web UI (confighttp)"},
+      {21, "TCP", "RTSP setup"},
+      {9, "UDP", "video stream"},
+      {10, "UDP", "control"},
+      {11, "UDP", "audio stream"},
+    };
+  }  // namespace
+
+  port_validation_t validate_stream_ports() {
+    boost::asio::io_context ioc;
+    const auto af = af_from_enum_string(config::sunshine.address_family);
+    const bool is_v4 = (af == IPV4);
+
+    port_validation_t result;
+#ifdef _WIN32
+    // Windows reserves parts of the ephemeral range (>= 49152) at every boot for
+    // Hyper-V / WSL2 / Docker / WinNAT, so a base port there can fail non-deterministically.
+    result.ephemeral_range = config::sunshine.port >= 49152;
+#endif
+
+    for (const auto &spec : kStreamingPorts) {
+      const auto port = map_port(spec.delta);
+      boost::system::error_code ec;
+
+      if (spec.proto == "TCP"sv) {
+        ip::tcp::acceptor acc(ioc);
+        acc.open(is_v4 ? ip::tcp::v4() : ip::tcp::v6(), ec);
+        if (!ec) {
+          acc.set_option(boost::asio::socket_base::reuse_address {true}, ec);
+          if (!ec) acc.bind(ip::tcp::endpoint(is_v4 ? ip::tcp::v4() : ip::tcp::v6(), port), ec);
+          boost::system::error_code ignored;
+          acc.close(ignored);
+        }
+      } else {
+        ip::udp::socket sock(ioc);
+        sock.open(is_v4 ? ip::udp::v4() : ip::udp::v6(), ec);
+        if (!ec) {
+          sock.set_option(boost::asio::socket_base::reuse_address {true}, ec);
+          if (!ec) sock.bind(ip::udp::endpoint(is_v4 ? ip::udp::v4() : ip::udp::v6(), port), ec);
+          boost::system::error_code ignored;
+          sock.close(ignored);
+        }
+      }
+
+      if (ec) {
+        result.failures.push_back({spec.delta, port, spec.proto, spec.role, ec.value(), ec.message()});
+        if (spec.delta == 1) result.ui_port_blocked = true;
+      }
+    }
+
+    return result;
+  }
+
+  std::string format_port_failure(const port_failure_t &f) {
+    // Reconstruct an error_code solely to drive bind_error_explanation(), which only
+    // inspects the integer value. The original message is preserved in f.message.
+    boost::system::error_code ec(
+      f.error_value,
+#ifdef _WIN32
+      boost::system::system_category()
+#else
+      boost::system::generic_category()
+#endif
+    );
+
+    std::ostringstream ss;
+    ss << "["sv << f.proto << "] "sv << f.role << " on port "sv << f.port
+       << ": ["sv << f.error_value << "] "sv << f.message
+       << bind_error_explanation(ec);
+    return ss.str();
+  }
+
+  std::string bind_error_explanation(const boost::system::error_code &ec) {
+    if (!ec) {
+      return {};
+    }
+
+#ifdef _WIN32
+    constexpr int kAccessDenied = 10013;  // WSAEACCES
+    constexpr int kAddrInUse = 10048;  // WSAEADDRINUSE
+#else
+    constexpr int kAccessDenied = EACCES;
+    constexpr int kAddrInUse = EADDRINUSE;
+#endif
+
+    std::ostringstream ss;
+    ss << "\n        Hint: "sv;
+    if (ec.value() == kAccessDenied) {
+#ifdef _WIN32
+      ss << "permission denied. The port is likely inside a reserved/excluded Windows port range "
+            "(Hyper-V, WSL2, Docker, WinNAT). Inspect with:\n"
+            "          netsh int ipv4 show excludedportrange protocol=tcp\n"
+            "        Choose a base port below 49152: Windows may reserve any port >= 49152 at each boot."sv;
+#else
+      ss << "permission denied. Ports below 1024 require elevated privileges. Run LavApollo as root, "
+            "grant 'cap_net_bind_service' with setcap, or pick a base port whose derived ports are all >= 1024."sv;
+#endif
+    } else if (ec.value() == kAddrInUse) {
+      ss << "the port is already in use by another process."sv;
+    } else {
+      ss << "the port may be in use or blocked by a firewall/antivirus."sv;
+    }
+    return ss.str();
   }
 
   /**

@@ -303,6 +303,7 @@
     "port": "Port",
     "port_alert_1": "Apollo 1024'ün altındaki bağlantı noktalarını kullanamaz!",
     "port_alert_2": "65535'in üzerindeki bağlantı noktaları kullanılamaz!",
+    "port_alert_ephemeral": "Ports at or above 49152 are inside the Windows ephemeral range and may be reserved by Hyper-V, WSL2, Docker or WinNAT at every boot. If streaming fails after a reboot, pick a base port below 49152. Check with: netsh int ipv4 show excludedportrange protocol=tcp",
     "port_desc": "Apollo tarafından kullanılan bağlantı noktaları ailesini ayarlayın",
     "port_http_port_note": "Moonlight ile bağlantı kurmak için bu bağlantı noktasını kullanın.",
     "port_note": "Not",

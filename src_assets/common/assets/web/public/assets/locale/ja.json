@@ -303,6 +303,7 @@
     "port": "ポート",
     "port_alert_1": "1024以下のポートを使用することはできません!",
     "port_alert_2": "65535以上のポートは利用できません!",
+    "port_alert_ephemeral": "Ports at or above 49152 are inside the Windows ephemeral range and may be reserved by Hyper-V, WSL2, Docker or WinNAT at every boot. If streaming fails after a reboot, pick a base port below 49152. Check with: netsh int ipv4 show excludedportrange protocol=tcp",
     "port_desc": "Apolloが使用するポートのファミリーを設定する",
     "port_http_port_note": "Moonlight に接続するには、このポートを使用してください。",
     "port_note": "メモ",

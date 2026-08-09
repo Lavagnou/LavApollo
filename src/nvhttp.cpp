@@ -1741,7 +1741,7 @@ namespace nvhttp {
     http_server.config.address = net::af_to_any_address_string(address_family);
     http_server.config.port = port_http;
 
-    auto accept_and_run = [&](auto *http_server) {
+    auto accept_and_run = [&](auto *http_server, std::uint16_t port, std::string_view role) {
       try {
         http_server->start();
       } catch (boost::system::system_error &err) {
@@ -1750,13 +1750,21 @@ namespace nvhttp {
           return;
         }
 
-        BOOST_LOG(fatal) << "Couldn't start http server on ports ["sv << port_https << ", "sv << port_https << "]: "sv << err.what();
-        shutdown_event->raise(true);
+        BOOST_LOG(fatal) << "Couldn't bind "sv << role << " on port ["sv << port << "]: "sv << err.what() << net::bind_error_explanation(err.code());
+        // Do not raise a global shutdown: the Web UI must stay up to surface this error.
+        return;
+      } catch (std::exception &err) {
+        // Safety net so no exception can escape a std::thread and trigger std::terminate/abort.
+        if (shutdown_event->peek()) {
+          return;
+        }
+
+        BOOST_LOG(fatal) << "Couldn't start "sv << role << " on port ["sv << port << "]: "sv << err.what();
         return;
       }
     };
-    std::thread ssl {accept_and_run, &https_server};
-    std::thread tcp {accept_and_run, &http_server};
+    std::thread ssl {accept_and_run, &https_server, port_https, "HTTPS streaming (nvhttp)"sv};
+    std::thread tcp {accept_and_run, &http_server, port_http, "HTTP streaming (nvhttp)"sv};
 
     // Wait for any event
     shutdown_event->view();

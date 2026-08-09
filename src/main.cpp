@@ -6,6 +6,7 @@
 #include <codecvt>
 #include <csignal>
 #include <fstream>
+#include <future>
 #include <iostream>
 
 // local includes
@@ -16,6 +17,7 @@
 #include "httpcommon.h"
 #include "logging.h"
 #include "main.h"
+#include "network.h"
 #include "nvhttp.h"
 #include "process.h"
 #include "system_tray.h"
@@ -410,26 +412,68 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  std::unique_ptr<platf::deinit_t> mDNS;
-  auto sync_mDNS = std::async(std::launch::async, [&mDNS]() {
-    if (config::sunshine.enable_discovery) {
-      mDNS = platf::publish::start();
+  // Pre-flight: verify every streaming port can be bound before advertising the
+  // host or starting the streaming servers. This catches reserved/excluded Windows
+  // port ranges (WSAEACCES) and ports already in use, and lists *all* failing ports
+  // at once instead of dying on the first.
+  auto port_report = net::validate_stream_ports();
+  const bool streaming_ports_ok = port_report.failures.empty();
+
+  if (!streaming_ports_ok) {
+    BOOST_LOG(fatal) << "Streaming ports are unavailable; streaming will be disabled. "
+                        "The Web UI remains available to fix the configuration."sv;
+    for (const auto &f : port_report.failures) {
+      BOOST_LOG(fatal) << net::format_port_failure(f);
     }
-  });
+#ifdef _WIN32
+    if (port_report.ephemeral_range) {
+      BOOST_LOG(fatal) << "Base port "sv << config::sunshine.port
+                       << " is inside the Windows ephemeral range (>= 49152); Windows may "
+                          "reserve any of the derived ports at each boot. Inspect with: "
+                          "netsh int ipv4 show excludedportrange protocol=tcp"sv;
+    }
+#endif
+  }
+
+  // Only advertise the host (mDNS/UPnP) when it can actually stream.
+  std::unique_ptr<platf::deinit_t> mDNS;
+  std::future<void> sync_mDNS;
+  if (streaming_ports_ok) {
+    sync_mDNS = std::async(std::launch::async, [&mDNS]() {
+      if (config::sunshine.enable_discovery) {
+        mDNS = platf::publish::start();
+      }
+    });
+  }
 
   std::unique_ptr<platf::deinit_t> upnp_unmap;
-  auto sync_upnp = std::async(std::launch::async, [&upnp_unmap]() {
-    upnp_unmap = upnp::start();
-  });
+  std::future<void> sync_upnp;
+  if (streaming_ports_ok) {
+    sync_upnp = std::async(std::launch::async, [&upnp_unmap]() {
+      upnp_unmap = upnp::start();
+    });
+  }
 
   // FIXME: Temporary workaround: Simple-Web_server needs to be updated or replaced
   if (shutdown_event->peek()) {
     return lifetime::desired_exit_code;
   }
 
-  std::thread httpThread {nvhttp::start};
+  // The Web UI is always started: in degraded mode it is the only channel that can
+  // surface the port-validation Fatal banner.
   std::thread configThread {confighttp::start};
-  std::thread rtspThread {rtsp_stream::start};
+
+  // Streaming servers are only started when pre-flight passed; otherwise they would
+  // just re-fail on bind and add noise on top of the validation report above.
+  std::thread httpThread;
+  std::thread rtspThread;
+  if (streaming_ports_ok) {
+    httpThread = std::thread {nvhttp::start};
+    rtspThread = std::thread {rtsp_stream::start};
+  } else {
+    BOOST_LOG(warning) << "Streaming disabled due to port validation failures. "
+                          "Fix the Port setting in the Web UI and restart."sv;
+  }
 
 #ifdef _WIN32
   // If we're using the default port and GameStream is enabled, warn the user
@@ -458,9 +502,9 @@ int main(int argc, char *argv[]) {
   // Wait for shutdown, this is not necessary when we're using the main event loop
   shutdown_event->view();
 
-  httpThread.join();
-  configThread.join();
-  rtspThread.join();
+  if (httpThread.joinable()) httpThread.join();
+  if (rtspThread.joinable()) rtspThread.join();
+  if (configThread.joinable()) configThread.join();
 
   task_pool.stop();
   task_pool.join();

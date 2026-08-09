@@ -47,6 +47,10 @@ const effectivePort = computed(() => +config.value?.port ?? defaultMoonlightPort
       <div class="alert alert-danger" v-if="(+effectivePort + 21) > 65535">
         <i class="fa-solid fa-xl fa-triangle-exclamation"></i> {{ $t('config.port_alert_2') }}
       </div>
+      <!-- Warn if the base port is inside the Windows ephemeral range (Windows only) -->
+      <div class="alert alert-warning" v-if="platform === 'windows' && +effectivePort >= 49152">
+        <i class="fa-solid fa-xl fa-triangle-exclamation"></i> {{ $t('config.port_alert_ephemeral') }}
+      </div>
       <!-- Create a port table for the various ports needed by Apollo -->
       <table class="table">
         <thead>

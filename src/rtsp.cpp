@@ -1193,9 +1193,8 @@ namespace rtsp_stream {
 
     boost::system::error_code ec;
     if (server.bind(net::af_from_enum_string(config::sunshine.address_family), net::map_port(rtsp_stream::RTSP_SETUP_PORT), ec)) {
-      BOOST_LOG(fatal) << "Couldn't bind RTSP server to port ["sv << net::map_port(rtsp_stream::RTSP_SETUP_PORT) << "], " << ec.message();
-      shutdown_event->raise(true);
-
+      BOOST_LOG(fatal) << "Couldn't bind RTSP server to port ["sv << net::map_port(rtsp_stream::RTSP_SETUP_PORT) << "]: "sv << ec.message() << net::bind_error_explanation(ec);
+      // Do not raise a global shutdown: the Web UI must stay up to surface this error.
       return;
     }
 

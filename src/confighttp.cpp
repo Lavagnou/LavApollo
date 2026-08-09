@@ -1569,6 +1569,14 @@ namespace confighttp {
         // It's possible the exception gets thrown after calling server->stop() from a different thread
         if (shutdown_event->peek())
           return;
+        BOOST_LOG(fatal) << "Couldn't start Configuration HTTPS server on port ["sv << port_https << "]: "sv << err.what() << net::bind_error_explanation(err.code());
+        // This IS the Web UI: if it cannot bind there is no banner channel left, so shut down cleanly.
+        shutdown_event->raise(true);
+        return;
+      } catch (std::exception &err) {
+        // Safety net so no exception can escape a std::thread and trigger std::terminate/abort.
+        if (shutdown_event->peek())
+          return;
         BOOST_LOG(fatal) << "Couldn't start Configuration HTTPS server on port ["sv << port_https << "]: "sv << err.what();
         shutdown_event->raise(true);
         return;
