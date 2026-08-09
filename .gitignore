@@ -56,3 +56,15 @@ package-lock.json
 # Python
 *.pyc
 venv/
+
+# Secrets / credentials (defensive catch-all — never commit private keys or env files.
+# Note: *.cer / *.crt are intentionally NOT ignored; sudovda.cer is a tracked public cert.)
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
