@@ -294,6 +294,7 @@ namespace config {
 
     std::string log_file;
     bool notify_pre_releases;
+    bool update_auto_check;
     bool legacy_ordering;
     bool system_tray;
     std::vector<prep_cmd_t> prep_cmds;

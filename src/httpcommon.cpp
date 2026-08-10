@@ -218,6 +218,92 @@ namespace http {
     return result == CURLE_OK;
   }
 
+  bool download_file_with_progress(
+    const std::string &url,
+    const std::string &file,
+    std::function<void(uint64_t, uint64_t)> progress_cb,
+    long ssl_version
+  ) {
+    // sonar complains about weak ssl and tls versions; however sonar cannot detect the fix
+    CURL *curl = curl_easy_init();  // NOSONAR
+    if (!curl) {
+      BOOST_LOG(error) << "Couldn't create CURL instance";
+      return false;
+    }
+
+    if (std::string file_dir = file_handler::get_parent_directory(file); !file_handler::make_directory(file_dir)) {
+      BOOST_LOG(error) << "Couldn't create directory ["sv << file_dir << ']';
+      curl_easy_cleanup(curl);
+      return false;
+    }
+
+    FILE *fp = fopen(file.c_str(), "wb");
+    if (!fp) {
+      BOOST_LOG(error) << "Couldn't open ["sv << file << ']';
+      curl_easy_cleanup(curl);
+      return false;
+    }
+
+    auto xferinfo = +[](void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) -> int {
+      auto *cb = static_cast<std::function<void(uint64_t, uint64_t)> *>(clientp);
+      if (cb && *cb) {
+        (*cb)(static_cast<uint64_t>(dlnow), static_cast<uint64_t>(dltotal));
+      }
+      return 0;  // non-zero would abort the transfer
+    };
+
+    curl_easy_setopt(curl, CURLOPT_SSLVERSION, ssl_version);  // NOSONAR
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);  // GitHub assets redirect to a CDN
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress_cb);
+#ifdef _WIN32
+    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
+#endif
+    CURLcode result = curl_easy_perform(curl);
+    if (result != CURLE_OK) {
+      BOOST_LOG(error) << "Couldn't download ["sv << url << ", code:" << result << ']';
+    }
+    curl_easy_cleanup(curl);
+    fclose(fp);
+    return result == CURLE_OK;
+  }
+
+  std::string simple_get(const std::string &url, long ssl_version) {
+    std::string body;
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+      BOOST_LOG(error) << "Couldn't create CURL instance";
+      return body;
+    }
+
+    auto write_cb = +[](void *contents, size_t size, size_t nmemb, void *userp) -> size_t {
+      size_t total = size * nmemb;
+      auto *out = static_cast<std::string *>(userp);
+      out->append(static_cast<char *>(contents), total);
+      return total;
+    };
+
+    curl_easy_setopt(curl, CURLOPT_SSLVERSION, ssl_version);  // NOSONAR
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "LavApollo");  // GitHub API rejects requests without a User-Agent
+#ifdef _WIN32
+    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
+#endif
+    CURLcode result = curl_easy_perform(curl);
+    if (result != CURLE_OK) {
+      BOOST_LOG(error) << "Couldn't GET ["sv << url << ", code:" << result << ']';
+      body.clear();
+    }
+    curl_easy_cleanup(curl);
+    return body;
+  }
+
   std::string url_escape(const std::string &url) {
     char *string = curl_easy_escape(nullptr, url.c_str(), static_cast<int>(url.length()));
     std::string result(string);

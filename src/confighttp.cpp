@@ -38,6 +38,7 @@
 #include "platform/common.h"
 #include "process.h"
 #include "utility.h"
+#include "updater.h"
 #include "uuid.h"
 
 #ifdef _WIN32
@@ -1372,6 +1373,135 @@ namespace confighttp {
   }
 
   /**
+   * @brief Check GitHub for the latest LavApollo release.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/update/check| GET| null}
+   */
+  void updateCheckGet(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    auto info = updater::check_for_update();
+    nlohmann::json output_tree;
+    output_tree["status"] = true;
+    output_tree["current"] = info.current;
+    output_tree["latest"] = info.latest;
+    output_tree["latest_tag"] = info.latest_tag;
+    output_tree["update_available"] = info.update_available;
+    output_tree["service_managed"] = info.service_managed;
+    output_tree["platform"] = SUNSHINE_PLATFORM;
+    output_tree["release_notes_url"] = info.release_notes_url;
+    nlohmann::json asset;
+    asset["name"] = info.asset.name;
+    asset["url"] = info.asset.url;
+    asset["size"] = info.asset.size;
+    output_tree["asset"] = asset;
+    if (!info.error.empty()) output_tree["error"] = info.error;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Start downloading (and verifying) the latest installer.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/update/download| POST| null}
+   */
+  void updateDownloadPost(resp_https_t response, req_https_t request) {
+    if (!validateContentType(response, request, "application/json") || !authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    auto info = updater::check_for_update();
+    bool started = updater::start_download(info);
+    auto status = updater::get_status();
+    nlohmann::json output_tree;
+    output_tree["status"] = true;
+    output_tree["started"] = started;
+    output_tree["state"] = static_cast<int>(status.state);
+    if (!status.message.empty()) output_tree["message"] = status.message;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Report the current download/install pipeline progress (polled by the UI).
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/update/status| GET| null}
+   */
+  void updateStatusGet(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    auto status = updater::get_status();
+    nlohmann::json output_tree;
+    output_tree["status"] = true;
+    output_tree["state"] = static_cast<int>(status.state);
+    output_tree["downloaded_bytes"] = status.downloaded_bytes;
+    output_tree["total_bytes"] = status.total_bytes;
+    output_tree["target_version"] = status.target_version;
+    if (!status.message.empty()) output_tree["message"] = status.message;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Apply the staged update: launch the installer silently and elevated.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Refused (409) while a streaming session is in progress. Does not self-exit — the installer drives the
+   * teardown (its uninstall step stops the service, which stops this process).
+   *
+   * @api_examples{/api/update/install| POST| null}
+   */
+  void updateInstallPost(resp_https_t response, req_https_t request) {
+    if (!validateContentType(response, request, "application/json") || !authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    auto status = updater::get_status();
+    if (status.state != updater::state_e::ready) {
+      bad_request(response, request, "The installer is not staged or verified. Download it first.");
+      return;
+    }
+
+    // Refuse while a session/app is running — the update would kill it mid-stream.
+    if (proc::proc.running()) {
+      constexpr SimpleWeb::StatusCode code = SimpleWeb::StatusCode::client_error_conflict;
+      nlohmann::json output_tree;
+      output_tree["status_code"] = static_cast<int>(code);
+      output_tree["status"] = false;
+      output_tree["error"] = "A session is currently in progress. Please close it before updating.";
+      SimpleWeb::CaseInsensitiveMultimap headers;
+      headers.emplace("Content-Type", "application/json");
+      headers.emplace("X-Frame-Options", "DENY");
+      headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
+      response->write(code, output_tree.dump(), headers);
+      return;
+    }
+
+    bool launched = updater::stage_installer();
+    nlohmann::json output_tree;
+    output_tree["status"] = launched;
+    output_tree["state"] = static_cast<int>(updater::get_status().state);
+    if (!launched) output_tree["error"] = updater::get_status().message;
+    send_response(response, output_tree);
+  }
+
+  /**
    * @brief Launch an application.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -1545,6 +1675,10 @@ namespace confighttp {
     server.resource["^/api/configLocale$"]["GET"] = getLocale;
     server.resource["^/api/restart$"]["POST"] = restart;
     server.resource["^/api/quit$"]["POST"] = quit;
+    server.resource["^/api/update/check$"]["GET"] = updateCheckGet;
+    server.resource["^/api/update/download$"]["POST"] = updateDownloadPost;
+    server.resource["^/api/update/status$"]["GET"] = updateStatusGet;
+    server.resource["^/api/update/install$"]["POST"] = updateInstallPost;
     server.resource["^/api/reset-display-device-persistence$"]["POST"] = resetDisplayDevicePersistence;
     server.resource["^/api/password$"]["POST"] = savePassword;
     server.resource["^/api/clients/unpair-all$"]["POST"] = unpairAll;

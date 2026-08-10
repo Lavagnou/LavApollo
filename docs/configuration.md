@@ -261,6 +261,30 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### update_auto_check
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Automatically check for new LavApollo releases when the web UI is opened. The check can also be
+            triggered manually from the home page.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            update_auto_check = enabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### system_tray
 
 <table>

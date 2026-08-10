@@ -229,6 +229,14 @@ onMounted(() => {
               default="false"
     ></Checkbox>
 
+    <!-- Check for updates automatically -->
+    <Checkbox class="mb-3"
+              id="update_auto_check"
+              locale-prefix="config"
+              v-model="config.update_auto_check"
+              default="true"
+    ></Checkbox>
+
     <!-- Enable system tray -->
     <Checkbox class="mb-3"
               id="system_tray"
