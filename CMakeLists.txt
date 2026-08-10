@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(LavApollo VERSION 0.0.0
         DESCRIPTION "Self-hosted game stream host for Artemis"
-        HOMEPAGE_URL "https://github.com/Lavagnou/Apollo_testings")
+        HOMEPAGE_URL "https://github.com/Lavagnou/LavApollo")
 
 set(PROJECT_LICENSE "GPL-3.0-only")
 
