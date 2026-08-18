@@ -298,7 +298,6 @@ namespace proc {
         }
 
         auto &displays = launch_session->virtual_displays;
-        const bool multi_display = displays.size() > 1;
 
         int target_fps = launch_session->fps ? launch_session->fps : 60000;
 
@@ -314,54 +313,88 @@ namespace proc {
         // We need to track it properly to remove the display when the session terminates.
         launch_session->virtual_display = true;
 
-        for (std::size_t i = 0; i < displays.size(); i++) {
-          auto &display = displays[i];
+        auto create_displays = [&]() -> bool {
+          const bool multi_display = displays.size() > 1;
+          bool all_created = true;
+
+          for (std::size_t i = 0; i < displays.size(); i++) {
+            auto &display = displays[i];
 
           // One GUID per display, derived from the session identity so relaunching the
           // same client reuses the same GUIDs and the driver replaces its displays instead
           // of stacking a fresh set beside the old ones. Index 0 is the identity itself,
           // so single-display sessions keep exactly the GUID they used before this became
           // a list.
-          auto display_uuid = device_uuid;
-          display_uuid.b64[1] ^= (std::uint64_t) i;
-          memcpy(&display.guid, &display_uuid, sizeof(GUID));
+            auto display_uuid = device_uuid;
+            display_uuid.b64[1] ^= (std::uint64_t) i;
+            memcpy(&display.guid, &display_uuid, sizeof(GUID));
 
           // The driver truncates this to 13 characters for the EDID name, so the suffix is
           // only there to tell the monitors apart in the Windows display settings.
-          auto display_label = multi_display ? device_name + " " + std::to_string(i + 1) : device_name;
+            auto display_label = multi_display ? device_name + " " + std::to_string(i + 1) : device_name;
 
-          display.device_name = VDISPLAY::createVirtualDisplay(
-            device_uuid_str.c_str(),
-            display_label.c_str(),
-            display.width,
-            display.height,
-            target_fps,
-            display.guid
-          );
+            display.device_name = VDISPLAY::createVirtualDisplay(
+              device_uuid_str.c_str(),
+              display_label.c_str(),
+              display.width,
+              display.height,
+              target_fps,
+              display.guid
+            );
 
-          if (display.device_name.empty()) {
-            BOOST_LOG(warning) << "Virtual Display creation failed, or cannot get created display name in time!";
-            continue;
+            if (display.device_name.empty()) {
+              BOOST_LOG(warning) << "Virtual Display creation failed, or cannot get created display name in time!";
+              all_created = false;
+              continue;
+            }
+
+            BOOST_LOG(info) << "Virtual Display created at " << display.device_name
+                            << " [" << display.width << 'x' << display.height
+                            << " at " << display.x << ',' << display.y << ']';
+
+            // Don't change display settings when no params are given
+            if (launch_session->width && launch_session->height && launch_session->fps) {
+              // Apply display settings
+              VDISPLAY::changeDisplaySettings(display.device_name.c_str(), display.width, display.height, target_fps);
+            }
+
+            // Check the ISOLATED DISPLAY configuration setting and rearrange the displays.
+            // Rearranging around a single virtual display is exactly what this option means;
+            // when the client supplied a layout, the arrangement is its call and running both
+            // would have them fighting over the same positions.
+            if (config::video.isolated_virtual_display_option == true && !multi_display) {
+              // Apply the isolated display settings
+              VDISPLAY::changeDisplaySettings2(display.device_name.c_str(), display.width, display.height, target_fps, true);
+            }
           }
 
-          BOOST_LOG(info) << "Virtual Display created at " << display.device_name
-                          << " [" << display.width << 'x' << display.height
-                          << " at " << display.x << ',' << display.y << ']';
+          return all_created;
+        };
 
-          // Don't change display settings when no params are given
-          if (launch_session->width && launch_session->height && launch_session->fps) {
-            // Apply display settings
-            VDISPLAY::changeDisplaySettings(display.device_name.c_str(), display.width, display.height, target_fps);
+        bool multi_display = displays.size() > 1;
+
+        if (!create_displays() && multi_display) {
+          // A layout missing a display is the worst possible outcome: capture would fall
+          // back to whichever single display did come up, and the client would letterbox
+          // that one into a canvas sized for the whole arrangement -- a strip of picture
+          // on the wrong monitor and nothing on the others. One display covering the whole
+          // canvas is wrong in a way the user can actually read, so start over as that.
+          BOOST_LOG(warning) << "Not every virtual display came up; falling back to a single display for the whole layout"sv;
+
+          for (const auto &display : displays) {
+            VDISPLAY::removeVirtualDisplay(display.guid);
           }
 
-          // Check the ISOLATED DISPLAY configuration setting and rearrange the displays.
-          // Rearranging around a single virtual display is exactly what this option means;
-          // when the client supplied a layout, the arrangement is its call and running both
-          // would have them fighting over the same positions.
-          if (config::video.isolated_virtual_display_option == true && !multi_display) {
-            // Apply the isolated display settings
-            VDISPLAY::changeDisplaySettings2(display.device_name.c_str(), display.width, display.height, target_fps, true);
-          }
+          rtsp_stream::virtual_display_t single;
+          single.width = render_width;
+          single.height = render_height;
+          single.primary = true;
+
+          displays.clear();
+          displays.push_back(single);
+          multi_display = false;
+
+          create_displays();
         }
 
         // Windows drops each new display wherever it likes, so the arrangement the client

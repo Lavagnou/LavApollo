@@ -1188,6 +1188,14 @@ namespace video {
       disp = platf::display(encoder.platform_formats->dev_type, proc::proc.display_name, capture_ctxs.front().config);
     }
     if (!disp) {
+      // Falling back here silently is how a broken multi-display capture ends up looking
+      // like a picture on the wrong monitor rather than like an error: we quietly capture
+      // some single display instead of the arrangement that was asked for.
+      if (!proc::proc.display_name.empty()) {
+        BOOST_LOG(warning) << "Could not capture ["sv << proc::proc.display_name
+                           << "], falling back to a single display"sv;
+      }
+
       // Get all the monitor names now, rather than at boot, to
       // get the most up-to-date list available monitors
       refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);

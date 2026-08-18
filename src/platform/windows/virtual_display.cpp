@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <chrono>
 #include <iostream>
 #include <vector>
 #include <setupapi.h>
@@ -792,15 +793,26 @@ std::wstring createVirtualDisplay(
 		return std::wstring();
 	}
 
+	// Windows does not attach a freshly added monitor to the desktop straight away, and
+	// GetAddedDisplayName() only finds it once it is an *active* path. The first add after
+	// the adapter has been idle is far slower than the ones that follow -- measured at
+	// roughly 900ms, against a former budget of 20+40+80+160+320 = 620ms of sleeps, so it
+	// gave up just before the display appeared. That failure is silent and expensive: the
+	// display exists, we simply do not know its name, so it is neither captured nor laid
+	// out. Wait against a deadline instead, and keep polling at a steady interval once the
+	// backoff has grown.
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 	uint32_t retryInterval = 20;
 	wchar_t deviceName[CCHDEVICENAME]{};
 	while (!GetAddedDisplayName(output, deviceName)) {
-		Sleep(retryInterval);
-		if (retryInterval > 320) {
+		if (std::chrono::steady_clock::now() >= deadline) {
 			printf("[SUDOVDA] Cannot get name for newly added virtual display!\n");
 			return std::wstring();
 		}
-		retryInterval *= 2;
+		Sleep(retryInterval);
+		if (retryInterval < 320) {
+			retryInterval *= 2;
+		}
 	}
 
 	wprintf(L"[SUDOVDA] Virtual display added successfully: %ls\n", deviceName);
