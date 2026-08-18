@@ -1640,6 +1640,380 @@ namespace platf::dxgi {
   }
 
   /**
+   * @brief Bring up capture over several displays at once.
+   * @param config Stream configuration.
+   * @param display_names The displays to combine, joined by name_separator.
+   */
+  int display_composite_vram_t::init(const ::video::config_t &config, const std::string &display_names) {
+    auto names = split_display_names(display_names);
+    if (names.size() < 2) {
+      BOOST_LOG(error) << "Composite capture needs at least two displays"sv;
+      return -1;
+    }
+
+    // The first display brings up the adapter, device, duplication, cursor shaders and
+    // blend states. Everything below borrows them rather than standing up its own.
+    if (display_ddup_vram_t::init(config, names.front())) {
+      return -1;
+    }
+
+    if (display_rotation != DXGI_MODE_ROTATION_UNSPECIFIED && display_rotation != DXGI_MODE_ROTATION_IDENTITY) {
+      BOOST_LOG(error) << "Composite capture does not support rotated displays"sv;
+      return -1;
+    }
+
+    // display_base_t::init() left these describing the first display on its own.
+    const int base_offset_x = offset_x;
+    const int base_offset_y = offset_y;
+    base_width = width;
+    base_height = height;
+
+    int left = base_offset_x;
+    int top = base_offset_y;
+    int right = base_offset_x + base_width;
+    int bottom = base_offset_y + base_height;
+
+    // duplication_t::init() reads display->output, so each extra source is duplicated by
+    // pointing that at its own output. It reads display->device as well, which is the
+    // whole point: one device across every duplication makes assembling them a plain GPU
+    // copy instead of a cross-device share.
+    auto base_output = std::move(output);
+
+    auto setup_extras = [&]() -> int {
+      for (size_t i = 1; i < names.size(); i++) {
+        auto source = std::make_unique<extra_source_t>();
+        auto wanted = from_utf8(names[i]);
+
+        DXGI_OUTPUT_DESC desc {};
+        bool found = false;
+
+        output_t::pointer output_p {};
+        for (int y = 0; adapter->EnumOutputs(y, &output_p) != DXGI_ERROR_NOT_FOUND; y++) {
+          output_t candidate {output_p};
+
+          DXGI_OUTPUT_DESC candidate_desc;
+          candidate->GetDesc(&candidate_desc);
+
+          if (candidate_desc.AttachedToDesktop &&
+              std::wstring_view(candidate_desc.DeviceName) == std::wstring_view(wanted)) {
+            source->output = std::move(candidate);
+            desc = candidate_desc;
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          BOOST_LOG(error) << "Failed to find output ["sv << names[i] << "] for composite capture"sv;
+          return -1;
+        }
+
+        if (desc.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED && desc.Rotation != DXGI_MODE_ROTATION_IDENTITY) {
+          BOOST_LOG(error) << "Composite capture does not support rotated displays"sv;
+          return -1;
+        }
+
+        // Same normalisation display_base_t::init() applies, so every source's origin is
+        // in one coordinate space before the bounding box is taken.
+        const int source_offset_x = desc.DesktopCoordinates.left - GetSystemMetrics(SM_XVIRTUALSCREEN);
+        const int source_offset_y = desc.DesktopCoordinates.top - GetSystemMetrics(SM_YVIRTUALSCREEN);
+
+        source->width = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
+        source->height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
+
+        // Desktop coordinates for now; rebased onto the canvas once the bounding box of
+        // every source is settled.
+        source->canvas_x = source_offset_x;
+        source->canvas_y = source_offset_y;
+
+        output = std::move(source->output);
+        auto ret = source->dup.init(this, config);
+        source->output = std::move(output);
+
+        if (ret) {
+          BOOST_LOG(error) << "Failed to duplicate output ["sv << names[i] << ']';
+          return -1;
+        }
+
+        left = std::min(left, source_offset_x);
+        top = std::min(top, source_offset_y);
+        right = std::max(right, source_offset_x + source->width);
+        bottom = std::max(bottom, source_offset_y + source->height);
+
+        extra_sources.push_back(std::move(source));
+      }
+
+      return 0;
+    };
+
+    auto ret = setup_extras();
+    output = std::move(base_output);
+
+    if (ret) {
+      return ret;
+    }
+
+    base_canvas_x = base_offset_x - left;
+    base_canvas_y = base_offset_y - top;
+
+    for (auto &source : extra_sources) {
+      source->canvas_x -= left;
+      source->canvas_y -= top;
+    }
+
+    // From here on this display *is* the bounding box. The image pool, the encoder and the
+    // absolute input mapping all read these, and none of them needs to know that several
+    // outputs feed it.
+    offset_x = left;
+    offset_y = top;
+    width = right - left;
+    height = bottom - top;
+    width_before_rotation = width;
+    height_before_rotation = height;
+
+    BOOST_LOG(info) << "Composite capture over "sv << names.size() << " displays ["sv
+                    << width << 'x' << height << " at "sv << offset_x << ',' << offset_y << ']';
+
+    return 0;
+  }
+
+  /**
+   * @brief Assemble one frame from every display and copy it into a snapshot texture.
+   * @param pull_free_image_cb call this to get a new free image from the video subsystem.
+   * @param img_out the assembled frame is returned here
+   * @param timeout how long to wait for the next frame
+   * @param cursor_visible
+   */
+  capture_e display_composite_vram_t::snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) {
+    bool have_update = false;
+    std::optional<std::chrono::steady_clock::time_point> frame_timestamp;
+
+    auto ensure_canvas = [&]() -> bool {
+      if (canvas) {
+        return true;
+      }
+
+      D3D11_TEXTURE2D_DESC t {};
+      t.Width = width;
+      t.Height = height;
+      t.MipLevels = 1;
+      t.ArraySize = 1;
+      t.SampleDesc.Count = 1;
+      t.Usage = D3D11_USAGE_DEFAULT;
+      t.Format = capture_format;
+      t.BindFlags = 0;
+
+      auto status = device->CreateTexture2D(&t, nullptr, &canvas);
+      if (FAILED(status)) {
+        BOOST_LOG(error) << "Failed to create composite canvas texture [0x"sv << util::hex(status).to_string_view() << ']';
+        return false;
+      }
+
+      return true;
+    };
+
+    auto pump = [&](duplication_t &source_dup, int index, int canvas_x, int canvas_y, int src_width, int src_height, std::chrono::milliseconds wait) -> capture_e {
+      DXGI_OUTDUPL_FRAME_INFO frame_info;
+      resource_t::pointer res_p {};
+
+      auto status = source_dup.next_frame(frame_info, wait, &res_p);
+      resource_t res {res_p};
+
+      if (status == capture_e::timeout) {
+        // Nothing new here. This display's part of the canvas still holds what it last
+        // drew, which is exactly what should keep being sent.
+        return capture_e::ok;
+      }
+
+      if (status != capture_e::ok) {
+        return status;
+      }
+
+      if (frame_info.LastPresentTime.QuadPart) {
+        texture2d_t src {};
+        if (FAILED(res->QueryInterface(IID_ID3D11Texture2D, (void **) &src))) {
+          BOOST_LOG(error) << "Couldn't query the desktop texture interface"sv;
+          return capture_e::error;
+        }
+
+        D3D11_TEXTURE2D_DESC desc;
+        src->GetDesc(&desc);
+
+        // Racing a mode change: the canvas sized at init no longer describes the desktop.
+        if ((int) desc.Width != src_width || (int) desc.Height != src_height) {
+          BOOST_LOG(info) << "Capture size changed on one display of the composite ["sv
+                          << src_width << 'x' << src_height << " -> "sv << desc.Width << 'x' << desc.Height << ']';
+          return capture_e::reinit;
+        }
+
+        if (capture_format == DXGI_FORMAT_UNKNOWN) {
+          capture_format = desc.Format;
+          BOOST_LOG(info) << "Capture format ["sv << dxgi_format_to_string(capture_format) << ']';
+        }
+
+        // Every display has to agree on a format, since they all land in one canvas.
+        if (capture_format != desc.Format) {
+          BOOST_LOG(info) << "Capture format changed ["sv << dxgi_format_to_string(capture_format)
+                          << " -> "sv << dxgi_format_to_string(desc.Format) << ']';
+          return capture_e::reinit;
+        }
+
+        if (!ensure_canvas()) {
+          return capture_e::error;
+        }
+
+        device_ctx->CopySubresourceRegion(canvas.get(), 0, canvas_x, canvas_y, 0, src.get(), 0, nullptr);
+        have_update = true;
+      }
+
+      if (frame_info.PointerShapeBufferSize > 0) {
+        DXGI_OUTDUPL_POINTER_SHAPE_INFO shape_info {};
+        util::buffer_t<std::uint8_t> img_data {frame_info.PointerShapeBufferSize};
+
+        UINT dummy;
+        auto shape_status = source_dup.dup->GetFramePointerShape(img_data.size(), std::begin(img_data), &dummy, &shape_info);
+        if (FAILED(shape_status)) {
+          BOOST_LOG(error) << "Failed to get new pointer shape [0x"sv << util::hex(shape_status).to_string_view() << ']';
+          return capture_e::error;
+        }
+
+        auto alpha_cursor_img = make_cursor_alpha_image(img_data, shape_info);
+        auto xor_cursor_img = make_cursor_xor_image(img_data, shape_info);
+
+        if (!set_cursor_texture(device.get(), cursor_alpha, std::move(alpha_cursor_img), shape_info) ||
+            !set_cursor_texture(device.get(), cursor_xor, std::move(xor_cursor_img), shape_info)) {
+          return capture_e::error;
+        }
+
+        have_update = true;
+      }
+
+      if (frame_info.LastMouseUpdateTime.QuadPart) {
+        // Only the display the pointer is actually over reports it visible. Without
+        // tracking which one owns it, every other display's report would hide it again
+        // the moment it was drawn.
+        if (frame_info.PointerPosition.Visible) {
+          cursor_owner = index;
+        } else if (cursor_owner != index) {
+          return capture_e::ok;
+        }
+
+        const int cursor_x = canvas_x + frame_info.PointerPosition.Position.x;
+        const int cursor_y = canvas_y + frame_info.PointerPosition.Position.y;
+
+        cursor_alpha.set_pos(cursor_x, cursor_y, width, height, display_rotation, frame_info.PointerPosition.Visible);
+        cursor_xor.set_pos(cursor_x, cursor_y, width, height, display_rotation, frame_info.PointerPosition.Visible);
+
+        have_update = true;
+      }
+
+      if (auto qpc_displayed = std::max(frame_info.LastPresentTime.QuadPart, frame_info.LastMouseUpdateTime.QuadPart)) {
+        // Translate QueryPerformanceCounter() value to steady_clock time point. The oldest
+        // contributing frame is the honest timestamp for the assembled picture.
+        auto stamp = std::chrono::steady_clock::now() - qpc_time_difference(qpc_counter(), qpc_displayed);
+        if (!frame_timestamp || stamp < *frame_timestamp) {
+          frame_timestamp = stamp;
+        }
+      }
+
+      return capture_e::ok;
+    };
+
+    // The first source gets the caller's timeout and the rest are polled. They are separate
+    // duplications with independent vblanks, so waiting on each in turn would multiply the
+    // wait by the number of displays and wreck the frame pacing. Whichever source ticks
+    // drives the frame; the others contribute whatever the canvas already holds.
+    auto status = pump(dup, -1, base_canvas_x, base_canvas_y, base_width, base_height, timeout);
+    if (status != capture_e::ok) {
+      return status;
+    }
+
+    for (size_t i = 0; i < extra_sources.size(); i++) {
+      auto &source = *extra_sources[i];
+      status = pump(source.dup, (int) i, source.canvas_x, source.canvas_y, source.width, source.height, std::chrono::milliseconds(0));
+      if (status != capture_e::ok) {
+        return status;
+      }
+    }
+
+    // No canvas means no display has produced a frame yet, so the capture format is still
+    // unknown and there is nothing an image could be built from.
+    if (!have_update || !canvas) {
+      return capture_e::timeout;
+    }
+
+    if (!pull_free_image_cb(img_out)) {
+      return capture_e::interrupted;
+    }
+
+    auto d3d_img = std::static_pointer_cast<img_d3d_t>(img_out);
+    if (complete_img(d3d_img.get(), false)) {
+      return capture_e::error;
+    }
+
+    // Shared with the encoder's direct3d device, so nothing may touch it unlocked.
+    texture_lock_helper lock_helper(d3d_img->capture_mutex.get());
+    if (!lock_helper.lock()) {
+      BOOST_LOG(error) << "Failed to lock capture texture"sv;
+      return capture_e::error;
+    }
+
+    d3d_img->blank = false;
+    device_ctx->CopyResource(d3d_img->capture_texture.get(), canvas.get());
+
+    if (cursor_visible && (cursor_alpha.visible || cursor_xor.visible)) {
+      device_ctx->VSSetShader(cursor_vs.get(), nullptr, 0);
+      device_ctx->PSSetShader(cursor_ps.get(), nullptr, 0);
+      device_ctx->OMSetRenderTargets(1, &d3d_img->capture_rt, nullptr);
+
+      if (cursor_alpha.texture.get()) {
+        // Perform an alpha blending operation
+        device_ctx->OMSetBlendState(blend_alpha.get(), nullptr, 0xFFFFFFFFu);
+
+        device_ctx->PSSetShaderResources(0, 1, &cursor_alpha.input_res);
+        device_ctx->RSSetViewports(1, &cursor_alpha.cursor_view);
+        device_ctx->Draw(3, 0);
+      }
+
+      if (cursor_xor.texture.get()) {
+        // Perform an invert blending without touching alpha values
+        device_ctx->OMSetBlendState(blend_invert.get(), nullptr, 0x00FFFFFFu);
+
+        device_ctx->PSSetShaderResources(0, 1, &cursor_xor.input_res);
+        device_ctx->RSSetViewports(1, &cursor_xor.cursor_view);
+        device_ctx->Draw(3, 0);
+      }
+
+      device_ctx->OMSetBlendState(blend_disable.get(), nullptr, 0xFFFFFFFFu);
+
+      ID3D11RenderTargetView *emptyRenderTarget = nullptr;
+      device_ctx->OMSetRenderTargets(1, &emptyRenderTarget, nullptr);
+      device_ctx->RSSetViewports(0, nullptr);
+      ID3D11ShaderResourceView *emptyShaderResourceView = nullptr;
+      device_ctx->PSSetShaderResources(0, 1, &emptyShaderResourceView);
+    }
+
+    img_out->frame_timestamp = frame_timestamp;
+
+    return capture_e::ok;
+  }
+
+  capture_e display_composite_vram_t::release_snapshot() {
+    // Every duplication that handed out a frame has to be released, whatever any one of
+    // them reports, or the ones we skipped would never produce another frame.
+    auto status = dup.release_frame();
+
+    for (auto &source : extra_sources) {
+      auto extra_status = source->dup.release_frame();
+      if (status == capture_e::ok) {
+        status = extra_status;
+      }
+    }
+
+    return status;
+  }
+
+  /**
    * Get the next frame from the Windows.Graphics.Capture API and copy it into a new snapshot texture.
    * @param pull_free_image_cb call this to get a new free image from the video subsystem.
    * @param img_out the captured frame is returned here

@@ -1065,6 +1065,12 @@ namespace nvhttp {
       } else {
         tree.put("root.VirtualDisplayDriverReady", true);
       }
+
+      // Tells the client it may send `displayLayout=` and get one emulated display per
+      // monitor. A host without this creates a single display the size of the whole
+      // layout instead, which works but is not what the client asked for -- so the client
+      // warns rather than leaving the user to wonder where their second screen went.
+      tree.put("root.MultiDisplayCapable", true);
     #endif
     } else {
       tree.put("root.mac", "00:00:00:00:00:00");

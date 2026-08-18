@@ -394,11 +394,30 @@ namespace proc {
           this->virtual_display = true;
           this->display_name = platf::to_utf8(created->device_name);
 
+          // Capture spans every emulated display at once, so the capture side is handed all
+          // of their names joined together and assembles one picture the size of their
+          // bounding box. Only proc.display_name takes the joined form: config::video
+          // .output_name feeds encoder probing and libdisplaydevice, which both want a
+          // single real display, so it keeps pointing at the first one.
+          if (multi_display) {
+            std::vector<std::string> capture_names;
+            for (const auto &display : displays) {
+              if (!display.device_name.empty()) {
+                capture_names.push_back(platf::to_utf8(display.device_name));
+              }
+            }
+
+            if (capture_names.size() > 1) {
+              this->display_name = platf::join_display_names(capture_names);
+              BOOST_LOG(info) << "Capturing "sv << capture_names.size() << " displays as one picture"sv;
+            }
+          }
+
           // When using virtual display, we don't care which display user configured to use.
           // So we always set output_name to the newly created virtual display as a workaround for
           // empty name when probing graphics cards.
 
-          config::video.output_name = display_device::map_display_name(this->display_name);
+          config::video.output_name = display_device::map_display_name(platf::to_utf8(created->device_name));
         }
       } else {
         // Driver isn't working so we don't need to track virtual display.

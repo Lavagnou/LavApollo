@@ -338,6 +338,60 @@ namespace platf::dxgi {
   };
 
   /**
+   * Display backend that captures several displays into a single image.
+   *
+   * The captured image is the bounding box of the displays, each one's pixels placed where
+   * it sits on the desktop, so the result is geometrically identical to the region of the
+   * desktop it spans. That is precisely what lets absolute pointer input map through with
+   * no protocol change: make_port() in video.cpp derives the client's coordinate plane from
+   * this display's own offset and size, and neither knows nor cares that several outputs
+   * went into it.
+   *
+   * Everything but the assembly is inherited. One D3D11 device drives every duplication, so
+   * combining them is a plain GPU copy with no resource sharing, and the cursor shaders,
+   * blend states and image pool are the ones display_ddup_vram_t already set up.
+   */
+  class display_composite_vram_t: public display_ddup_vram_t {
+  public:
+    int init(const ::video::config_t &config, const std::string &display_names);
+    capture_e snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) override;
+    capture_e release_snapshot() override;
+
+    /// A display captured alongside the one display_ddup_vram_t already owns.
+    struct extra_source_t {
+      output_t output;
+      duplication_t dup;
+      int canvas_x;
+      int canvas_y;
+      int width;
+      int height;
+    };
+
+    /// Where the inherited display's own pixels land in the canvas.
+    int base_canvas_x = 0;
+    int base_canvas_y = 0;
+    int base_width = 0;
+    int base_height = 0;
+
+    /// unique_ptr because duplication_t declares a destructor and so is not movable.
+    std::vector<std::unique_ptr<extra_source_t>> extra_sources;
+
+    /**
+     * Holds the assembled desktop between frames.
+     *
+     * The displays have independent vblanks, so on any given frame most of them have
+     * nothing new. Keeping the assembly means a source that did not update keeps showing
+     * what it last drew instead of going black.
+     */
+    texture2d_t canvas;
+
+    /// Index into extra_sources of the display the cursor was last seen on, or -1 for the
+    /// inherited display. Only the display the pointer is over reports it as visible, so
+    /// without this every other display's report would immediately hide it again.
+    int cursor_owner = -1;
+  };
+
+  /**
    * Display duplicator that uses the Windows.Graphics.Capture API.
    */
   class wgc_capture_t {

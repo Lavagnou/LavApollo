@@ -994,6 +994,24 @@ namespace platf {
    * @param hwdevice_type enables possible use of hardware encoder
    */
   std::shared_ptr<display_t> display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config) {
+    // A composite request names several displays at once, to be captured as one picture.
+    // It is hardware-encoder only: assembling the desktop on the GPU just to read it back
+    // for a software encoder would cost more than the feature is worth, and the callers
+    // that can ask for this are the ones that already have a hardware encoder.
+    if (is_composite_display_name(display_name)) {
+      if (hwdevice_type != mem_type_e::dxgi) {
+        BOOST_LOG(error) << "Capturing several displays at once requires a hardware encoder"sv;
+        return nullptr;
+      }
+
+      auto disp = std::make_shared<dxgi::display_composite_vram_t>();
+      if (!disp->init(config, display_name)) {
+        return disp;
+      }
+
+      return nullptr;
+    }
+
     if (config::video.capture == "ddx" || config::video.capture.empty()) {
       if (hwdevice_type == mem_type_e::dxgi) {
         auto disp = std::make_shared<dxgi::display_ddup_vram_t>();

@@ -10,6 +10,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <vector>
 
 // lib includes
 #include <boost/core/noncopyable.hpp>
@@ -72,6 +73,54 @@ namespace nvenc {
 }
 
 namespace platf {
+  /**
+   * @brief Separator joining several display names into one capture request.
+   *
+   * A display name carrying this is a request to capture every named display into a single
+   * picture the size of their bounding box. It travels as one string because that is what
+   * the capture path already passes around: proc::proc.display_name, the capture thread and
+   * platf::display() all take a single name, and threading a list through all of them would
+   * touch far more code than this is worth.
+   *
+   * Only Windows implements it, in display_composite_vram_t.
+   */
+  constexpr char display_name_separator = '+';
+
+  inline bool is_composite_display_name(const std::string &display_name) {
+    return display_name.find(display_name_separator) != std::string::npos;
+  }
+
+  inline std::string join_display_names(const std::vector<std::string> &names) {
+    std::string joined;
+
+    for (const auto &name : names) {
+      if (!joined.empty()) {
+        joined += display_name_separator;
+      }
+      joined += name;
+    }
+
+    return joined;
+  }
+
+  inline std::vector<std::string> split_display_names(const std::string &joined) {
+    std::vector<std::string> names;
+
+    size_t start = 0;
+    while (start <= joined.size()) {
+      auto end = joined.find(display_name_separator, start);
+      if (end == std::string::npos) {
+        end = joined.size();
+      }
+      if (end > start) {
+        names.push_back(joined.substr(start, end - start));
+      }
+      start = end + 1;
+    }
+
+    return names;
+  }
+
   // Limited by bits in activeGamepadMask
   constexpr auto MAX_GAMEPADS = 16;
 
