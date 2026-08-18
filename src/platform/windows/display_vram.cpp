@@ -4,6 +4,7 @@
  */
 // standard includes
 #include <cmath>
+#include <thread>
 
 // platform includes
 #include <d3dcompiler.h>
@@ -1919,21 +1920,36 @@ namespace platf::dxgi {
       return capture_e::ok;
     };
 
-    // The first source gets the caller's timeout and the rest are polled. They are separate
-    // duplications with independent vblanks, so waiting on each in turn would multiply the
-    // wait by the number of displays and wreck the frame pacing. Whichever source ticks
-    // drives the frame; the others contribute whatever the canvas already holds.
-    auto status = pump(dup, -1, base_canvas_x, base_canvas_y, base_width, base_height, timeout);
-    if (status != capture_e::ok) {
-      return status;
-    }
+    // Only one duplication can be waited on at a time, and the displays have independent
+    // vblanks. Handing the whole timeout to one of them would cap the frame rate at
+    // 1/timeout whenever that display happens to be idle while another is not -- five
+    // frames a second on the 200ms path. So every source is polled in turn and the wait is
+    // spent sleeping between rounds: it costs a millisecond of latency granularity and
+    // keeps whichever display is actually moving in charge of the pace.
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
 
-    for (size_t i = 0; i < extra_sources.size(); i++) {
-      auto &source = *extra_sources[i];
-      status = pump(source.dup, (int) i, source.canvas_x, source.canvas_y, source.width, source.height, std::chrono::milliseconds(0));
+    while (true) {
+      auto status = pump(dup, -1, base_canvas_x, base_canvas_y, base_width, base_height, std::chrono::milliseconds(0));
       if (status != capture_e::ok) {
         return status;
       }
+
+      for (size_t i = 0; i < extra_sources.size(); i++) {
+        auto &source = *extra_sources[i];
+        status = pump(source.dup, (int) i, source.canvas_x, source.canvas_y, source.width, source.height, std::chrono::milliseconds(0));
+        if (status != capture_e::ok) {
+          return status;
+        }
+      }
+
+      if (have_update || std::chrono::steady_clock::now() >= deadline) {
+        break;
+      }
+
+      // Sleeping rather than spinning keeps us off the device lock that AcquireNextFrame()
+      // contends for with the encoding thread. Re-polling a source is safe: next_frame()
+      // releases whatever it was holding before acquiring again.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     // No canvas means no display has produced a frame yet, so the capture format is still
