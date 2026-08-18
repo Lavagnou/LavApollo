@@ -25,6 +25,22 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
   persists, the encoder bitrate is cut and later restored. Implemented via `encode_session_t::update_bitrate()`
   and `NvEncReconfigureEncoder` (rate control only, no encoder reset / IDR), signalled from the control
   thread to the encoder thread through the `mail::bitrate_change` event.
+- **Emulated multi-display** — a client can send `displayLayout=` on `/launch` (`x,y,w,h,primary`
+  per display, in the coordinate space of the `mode=` it already sends) and get one virtual display
+  per monitor instead of one big one. `launch_session_t` carries a `std::vector<virtual_display_t>`;
+  a single-display client just gets a one-element list, so creation, arrangement and teardown have
+  one code path. Advertised to clients as `MultiDisplayCapable` in `serverinfo`.
+  - `VDISPLAY::applyVirtualDisplayLayout()` places them in **one** `SetDisplayConfig` call —
+    moving them one at a time passes through overlapping arrangements, which Windows refuses.
+  - `display_composite_vram_t` (in `display_vram.cpp`) captures them all into one frame the size of
+    their bounding box. ⚠️ **The frame must stay geometrically identical to that region of the
+    desktop**: `make_port()` in `video.cpp` derives the client's coordinate plane from the captured
+    display's own offset and size, which is the only reason absolute mouse/touch/pen need no
+    protocol change. Packing the displays tighter would break that.
+  - Displays reach the capture layer as one `+`-joined name (`platf::join_display_names`), because
+    `proc.display_name`, the capture thread and `platf::display()` all take a single name.
+  - ⚠️ SudoVDA attaches a **default 1920x1080 monitor** when its adapter first wakes up, so our
+    displays are always tracked by the GUID we created them with, never by enumerating the adapter.
 - Send pacing derived from the negotiated stream bitrate rather than a hardcoded 800 Mbps.
 - Video queue drops the oldest frames on overflow instead of flushing.
 - Higher NVENC quality defaults (P4 preset, spatial AQ).
