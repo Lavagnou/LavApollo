@@ -6,11 +6,14 @@
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 
 // standard includes
+#include <algorithm>
 #include <filesystem>
 #include <format>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <string>
+#include <vector>
 
 // lib includes
 #include <boost/asio/ssl/context.hpp>
@@ -379,6 +382,113 @@ namespace nvhttp {
     }
   }
 
+#ifdef _WIN32
+  /**
+   * @brief Parse the `displayLayout=` launch argument into the displays to emulate.
+   *
+   * Format is `x,y,w,h,primary` per display, `;` separated, with coordinates already
+   * normalised by the client so the layout's bounding box starts at (0,0). That bounding
+   * box is what the client sends as `mode=`, which is why it is the yardstick here.
+   *
+   * Gaps between displays are legitimate -- a layout that does not tile its bounding box
+   * simply leaves black in the stream -- but a rectangle escaping the canvas, an overlap,
+   * or a disagreement with `mode=` means client and host would render different geometry.
+   * Anything of the sort rejects the whole layout rather than applying part of it: falling
+   * back to one big display is a comprehensible outcome, half a layout is not.
+   *
+   * @param layout The raw argument value; empty when the client did not ask for a layout.
+   * @param canvas_width Stream width the client requested via `mode=`.
+   * @param canvas_height Stream height the client requested via `mode=`.
+   * @return The requested displays, or an empty vector if absent or invalid.
+   */
+  std::vector<rtsp_stream::virtual_display_t> parse_display_layout(const std::string &layout, int canvas_width, int canvas_height) {
+    if (layout.empty()) {
+      return {};
+    }
+
+    auto reject = [&](const std::string_view &why) {
+      BOOST_LOG(warning) << "Ignoring displayLayout ["sv << layout << "]: "sv << why;
+      return std::vector<rtsp_stream::virtual_display_t> {};
+    };
+
+    std::vector<rtsp_stream::virtual_display_t> displays;
+
+    std::stringstream groups(layout);
+    std::string group;
+    while (std::getline(groups, group, ';')) {
+      if (group.empty()) {
+        continue;
+      }
+
+      if (displays.size() >= rtsp_stream::MAX_VIRTUAL_DISPLAYS) {
+        return reject("more displays than we are willing to emulate"sv);
+      }
+
+      int fields[5] = {};
+      int field_count = 0;
+      std::stringstream parts(group);
+      std::string part;
+      while (field_count < 5 && std::getline(parts, part, ',')) {
+        fields[field_count++] = atoi(part.c_str());
+      }
+
+      if (field_count != 5) {
+        return reject("expected x,y,w,h,primary per display"sv);
+      }
+
+      rtsp_stream::virtual_display_t display;
+      display.x = fields[0];
+      display.y = fields[1];
+      display.width = fields[2];
+      display.height = fields[3];
+      display.primary = fields[4] != 0;
+
+      if (display.width <= 0 || display.height <= 0 || display.x < 0 || display.y < 0) {
+        return reject("a display has a negative origin or a non-positive size"sv);
+      }
+
+      if (display.x + display.width > canvas_width || display.y + display.height > canvas_height) {
+        return reject("a display falls outside the requested stream size"sv);
+      }
+
+      for (const auto &other : displays) {
+        if (display.x < other.x + other.width && other.x < display.x + display.width &&
+            display.y < other.y + other.height && other.y < display.y + display.height) {
+          return reject("two displays overlap"sv);
+        }
+      }
+
+      displays.push_back(display);
+    }
+
+    if (displays.size() < 2) {
+      return reject("fewer than two displays, which is just the ordinary single display path"sv);
+    }
+
+    // The bounding box has to fill the canvas, give or take the one pixel per axis the
+    // client is allowed to add to keep the encoded size even. Anything looser and the
+    // client would be rendering a different rectangle than the host is capturing.
+    int union_width = 0;
+    int union_height = 0;
+    int primary_count = 0;
+    for (const auto &display : displays) {
+      union_width = std::max(union_width, display.x + display.width);
+      union_height = std::max(union_height, display.y + display.height);
+      primary_count += display.primary ? 1 : 0;
+    }
+
+    if (canvas_width - union_width > 1 || canvas_height - union_height > 1) {
+      return reject("the layout does not fill the requested stream size"sv);
+    }
+
+    if (primary_count != 1) {
+      return reject("exactly one display must be marked primary"sv);
+    }
+
+    return displays;
+  }
+#endif
+
   std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, bool input_only, const args_t &args, const crypto::named_cert_t* named_cert_p) {
     auto launch_session = std::make_shared<rtsp_stream::launch_session_t>();
 
@@ -461,6 +571,24 @@ namespace nvhttp {
     launch_session->enable_hdr = util::from_view(get_arg(args, "hdrMode", "0"));
     launch_session->virtual_display = util::from_view(get_arg(args, "virtualDisplay", "0")) || named_cert_p->always_use_virtual_display;
     launch_session->scale_factor = util::from_view(get_arg(args, "scaleFactor", "100"));
+
+#ifdef _WIN32
+    // Validated against the mode parsed above, so an admin-side display_mode override for
+    // this client makes the layout disagree with the canvas and get rejected -- which is
+    // the right outcome: the override wins and the client gets one display of that size.
+    launch_session->virtual_displays = parse_display_layout(
+      get_arg(args, "displayLayout", ""),
+      launch_session->width,
+      launch_session->height
+    );
+
+    if (!launch_session->virtual_displays.empty()) {
+      // Asking for a layout is as plain a request for virtual displays as the flag itself.
+      launch_session->virtual_display = true;
+      BOOST_LOG(info) << "Client ["sv << named_cert_p->name << "] requested "sv
+                      << launch_session->virtual_displays.size() << " emulated displays"sv;
+    }
+#endif
 
     launch_session->client_do_cmds = named_cert_p->do_cmds;
     launch_session->client_undo_cmds = named_cert_p->undo_cmds;

@@ -8,6 +8,7 @@
  #define BOOST_PROCESS_VERSION 1
 #endif
 // standard includes
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <thread>
@@ -276,7 +277,28 @@ namespace proc {
           device_uuid = uuid_util::uuid_t::parse(launch_session->unique_id);
         }
 
-        memcpy(&launch_session->display_guid, &device_uuid, sizeof(GUID));
+        // Scaling changes every display's size, and therefore every origin in the layout
+        // the client sent. Rescaling it here would hand the client a geometry it is not
+        // expecting to render, so drop back to the single display it can always cope with.
+        if (!launch_session->virtual_displays.empty() &&
+            (render_width != client_width || render_height != client_height)) {
+          BOOST_LOG(warning) << "Ignoring requested display layout: it cannot be combined with a scale factor"sv;
+          launch_session->virtual_displays.clear();
+        }
+
+        // Every session ends up with a list, including the ordinary single-display client.
+        // One code path for creation, layout and teardown means the common case cannot
+        // quietly drift away from the multi-display one.
+        if (launch_session->virtual_displays.empty()) {
+          rtsp_stream::virtual_display_t single;
+          single.width = render_width;
+          single.height = render_height;
+          single.primary = true;
+          launch_session->virtual_displays.push_back(single);
+        }
+
+        auto &displays = launch_session->virtual_displays;
+        const bool multi_display = displays.size() > 1;
 
         int target_fps = launch_session->fps ? launch_session->fps : 60000;
 
@@ -288,45 +310,95 @@ namespace proc {
           target_fps *= 2;
         }
 
-        std::wstring vdisplayName = VDISPLAY::createVirtualDisplay(
-          device_uuid_str.c_str(),
-          device_name.c_str(),
-          render_width,
-          render_height,
-          target_fps,
-          launch_session->display_guid
-        );
-
         // No matter we get the display name or not, the virtual display might still be created.
         // We need to track it properly to remove the display when the session terminates.
         launch_session->virtual_display = true;
 
-        if (!vdisplayName.empty()) {
-          BOOST_LOG(info) << "Virtual Display created at " << vdisplayName;
+        for (std::size_t i = 0; i < displays.size(); i++) {
+          auto &display = displays[i];
+
+          // One GUID per display, derived from the session identity so relaunching the
+          // same client reuses the same GUIDs and the driver replaces its displays instead
+          // of stacking a fresh set beside the old ones. Index 0 is the identity itself,
+          // so single-display sessions keep exactly the GUID they used before this became
+          // a list.
+          auto display_uuid = device_uuid;
+          display_uuid.b64[1] ^= (std::uint64_t) i;
+          memcpy(&display.guid, &display_uuid, sizeof(GUID));
+
+          // The driver truncates this to 13 characters for the EDID name, so the suffix is
+          // only there to tell the monitors apart in the Windows display settings.
+          auto display_label = multi_display ? device_name + " " + std::to_string(i + 1) : device_name;
+
+          display.device_name = VDISPLAY::createVirtualDisplay(
+            device_uuid_str.c_str(),
+            display_label.c_str(),
+            display.width,
+            display.height,
+            target_fps,
+            display.guid
+          );
+
+          if (display.device_name.empty()) {
+            BOOST_LOG(warning) << "Virtual Display creation failed, or cannot get created display name in time!";
+            continue;
+          }
+
+          BOOST_LOG(info) << "Virtual Display created at " << display.device_name
+                          << " [" << display.width << 'x' << display.height
+                          << " at " << display.x << ',' << display.y << ']';
 
           // Don't change display settings when no params are given
           if (launch_session->width && launch_session->height && launch_session->fps) {
             // Apply display settings
-            VDISPLAY::changeDisplaySettings(vdisplayName.c_str(), render_width, render_height, target_fps);
+            VDISPLAY::changeDisplaySettings(display.device_name.c_str(), display.width, display.height, target_fps);
           }
 
-          // Check the ISOLATED DISPLAY configuration setting and rearrange the displays
-          if (config::video.isolated_virtual_display_option == true) {
+          // Check the ISOLATED DISPLAY configuration setting and rearrange the displays.
+          // Rearranging around a single virtual display is exactly what this option means;
+          // when the client supplied a layout, the arrangement is its call and running both
+          // would have them fighting over the same positions.
+          if (config::video.isolated_virtual_display_option == true && !multi_display) {
             // Apply the isolated display settings
-            VDISPLAY::changeDisplaySettings2(vdisplayName.c_str(), render_width, render_height, target_fps, true);
+            VDISPLAY::changeDisplaySettings2(display.device_name.c_str(), display.width, display.height, target_fps, true);
+          }
+        }
+
+        // Windows drops each new display wherever it likes, so the arrangement the client
+        // asked for has to be applied explicitly -- and only once every display exists,
+        // since it moves them all together.
+        if (multi_display) {
+          std::vector<VDISPLAY::LayoutEntry> layout;
+          for (const auto &display : displays) {
+            if (display.device_name.empty()) {
+              continue;
+            }
+            layout.push_back({display.device_name, display.x, display.y, display.width, display.height, display.primary});
           }
 
+          if (layout.size() != displays.size()) {
+            BOOST_LOG(warning) << "Not every virtual display came up; skipping layout to avoid a partial arrangement"sv;
+          } else if (VDISPLAY::applyVirtualDisplayLayout(layout, target_fps) != ERROR_SUCCESS) {
+            BOOST_LOG(warning) << "Failed to arrange the virtual displays as the client requested"sv;
+          } else {
+            BOOST_LOG(info) << "Arranged "sv << layout.size() << " virtual displays as requested"sv;
+          }
+        }
+
+        auto created = std::find_if(displays.begin(), displays.end(), [](const auto &display) {
+          return !display.device_name.empty();
+        });
+
+        if (created != displays.end()) {
           // Set virtual_display to true when everything went fine
           this->virtual_display = true;
-          this->display_name = platf::to_utf8(vdisplayName);
+          this->display_name = platf::to_utf8(created->device_name);
 
           // When using virtual display, we don't care which display user configured to use.
           // So we always set output_name to the newly created virtual display as a workaround for
           // empty name when probing graphics cards.
 
           config::video.output_name = display_device::map_display_name(this->display_name);
-        } else {
-          BOOST_LOG(warning) << "Virtual Display creation failed, or cannot get created display name in time!";
         }
       } else {
         // Driver isn't working so we don't need to track virtual display.
@@ -758,12 +830,17 @@ namespace proc {
 
     bool used_virtual_display = vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK && _launch_session && _launch_session->virtual_display;
     if (used_virtual_display) {
-      if (VDISPLAY::removeVirtualDisplay(_launch_session->display_guid)) {
-        BOOST_LOG(info) << "Virtual Display removed successfully";
-      } else if (this->virtual_display) {
-        BOOST_LOG(warning) << "Virtual Display remove failed";
-      } else {
-        BOOST_LOG(warning) << "Virtual Display remove failed, but it seems it was not created correctly either.";
+      // Remove every display we created, not just the first: a failure partway through
+      // would otherwise leave orphaned monitors attached to the host desktop, and nothing
+      // else knows their GUIDs.
+      for (const auto &display : _launch_session->virtual_displays) {
+        if (VDISPLAY::removeVirtualDisplay(display.guid)) {
+          BOOST_LOG(info) << "Virtual Display removed successfully";
+        } else if (this->virtual_display) {
+          BOOST_LOG(warning) << "Virtual Display remove failed";
+        } else {
+          BOOST_LOG(warning) << "Virtual Display remove failed, but it seems it was not created correctly either.";
+        }
       }
     }
 

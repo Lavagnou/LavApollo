@@ -308,6 +308,127 @@ LONG changeDisplaySettings(const wchar_t* deviceName, int width, int height, int
 	return changeDisplaySettings2(deviceName, width, height, refresh_rate);
 }
 
+LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refresh_rate) {
+	if (layout.empty()) {
+		return ERROR_INVALID_PARAMETER;
+	}
+
+	UINT32 pathCount = 0;
+	UINT32 modeCount = 0;
+	if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount)) {
+		wprintf(L"[SUDOVDA] Failed to query display configuration size.\n");
+		return ERROR_INVALID_PARAMETER;
+	}
+
+	std::vector<DISPLAYCONFIG_PATH_INFO> pathArray(pathCount);
+	std::vector<DISPLAYCONFIG_MODE_INFO> modeArray(modeCount);
+
+	if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, pathArray.data(), &modeCount, modeArray.data(), nullptr) != ERROR_SUCCESS) {
+		wprintf(L"[SUDOVDA] Failed to query display configuration.\n");
+		return ERROR_INVALID_PARAMETER;
+	}
+
+	constexpr size_t NOT_FOUND = (size_t)-1;
+	std::vector<size_t> modeIndex(layout.size(), NOT_FOUND);
+	std::vector<size_t> pathIndex(layout.size(), NOT_FOUND);
+
+	// The emulated displays are placed as one block to the right of everything already on
+	// the desktop. Only their positions relative to each other carry meaning: the client
+	// normalised its layout to start at (0,0), and capture reports whatever desktop origin
+	// the block lands on. So any free region will do, and "past the rightmost display" is
+	// free by construction -- while reusing (0,0) would collide with the existing primary,
+	// which Windows rejects outright.
+	int base_x = 0;
+
+	for (UINT32 i = 0; i < pathCount; i++) {
+		DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName = {};
+		sourceName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+		sourceName.header.size = sizeof(sourceName);
+		sourceName.header.adapterId = pathArray[i].sourceInfo.adapterId;
+		sourceName.header.id = pathArray[i].sourceInfo.id;
+
+		if (DisplayConfigGetDeviceInfo(&sourceName.header) != ERROR_SUCCESS) {
+			continue;
+		}
+
+		auto* sourceInfo = &pathArray[i].sourceInfo;
+
+		size_t slot = NOT_FOUND;
+		for (size_t k = 0; k < layout.size(); k++) {
+			if (std::wstring_view(sourceName.viewGdiDeviceName) == std::wstring_view(layout[k].deviceName)) {
+				slot = k;
+				break;
+			}
+		}
+
+		for (UINT32 j = 0; j < modeCount; j++) {
+			if (
+				modeArray[j].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE &&
+				modeArray[j].adapterId.HighPart == sourceInfo->adapterId.HighPart &&
+				modeArray[j].adapterId.LowPart == sourceInfo->adapterId.LowPart &&
+				modeArray[j].id == sourceInfo->id
+			) {
+				if (slot != NOT_FOUND) {
+					modeIndex[slot] = j;
+					pathIndex[slot] = i;
+				} else {
+					// A display we are not laying out: leave it alone, but start our block
+					// clear of it.
+					int right = modeArray[j].sourceMode.position.x + (int)modeArray[j].sourceMode.width;
+					if (right > base_x) {
+						base_x = right;
+					}
+				}
+				break;
+			}
+		}
+	}
+
+	for (size_t k = 0; k < layout.size(); k++) {
+		if (modeIndex[k] == NOT_FOUND) {
+			wprintf(L"[SUDOVDA] Display not found while applying layout: %ls\n", layout[k].deviceName.c_str());
+			return ERROR_DEVICE_NOT_CONNECTED;
+		}
+	}
+
+	// Every rectangle moves in the same SetDisplayConfig call. Applying them one at a time
+	// would walk through intermediate arrangements where two displays overlap, and Windows
+	// rejects those rather than tolerating them in passing.
+	for (size_t k = 0; k < layout.size(); k++) {
+		auto* sourceMode = &modeArray[modeIndex[k]].sourceMode;
+
+		sourceMode->position.x = base_x + layout[k].x;
+		sourceMode->position.y = layout[k].y;
+		sourceMode->width = layout[k].width;
+		sourceMode->height = layout[k].height;
+
+		pathArray[pathIndex[k]].targetInfo.refreshRate = {(UINT32)refresh_rate, 1000};
+	}
+
+	LONG status = SetDisplayConfig(
+		pathCount,
+		pathArray.data(),
+		modeCount,
+		modeArray.data(),
+		SDC_APPLY
+		| SDC_USE_SUPPLIED_DISPLAY_CONFIG
+		| SDC_SAVE_TO_DATABASE
+	);
+
+	if (status != ERROR_SUCCESS) {
+		wprintf(L"[SUDOVDA] Failed to apply display layout.\n");
+		return status;
+	}
+
+	wprintf(L"[SUDOVDA] Display layout applied to %d displays at x offset %d.\n", (int)layout.size(), base_x);
+
+	// Note: the layout's `primary` flag is deliberately not applied to Windows here.
+	// setPrimaryDisplay() writes through CDS_UPDATEREGISTRY, so it would outlive the
+	// session and leave the user's own primary monitor changed after streaming ends.
+	// Wiring it up needs a revert path first.
+
+	return ERROR_SUCCESS;
+}
 
 std::wstring getPrimaryDisplay() {
 	DISPLAY_DEVICEW displayDevice;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <string>
 #include <vector>
 
 #ifndef FILE_DEVICE_UNKNOWN
@@ -22,9 +23,34 @@ namespace VDISPLAY {
 
 	extern HANDLE SUDOVDA_DRIVER_HANDLE;
 
+	/**
+	 * @brief One display of a requested arrangement, in the client's canvas coordinates.
+	 */
+	struct LayoutEntry {
+		std::wstring deviceName;
+		int x;
+		int y;
+		int width;
+		int height;
+		bool primary;
+	};
+
 	LONG getDeviceSettings(const wchar_t* deviceName, DEVMODEW& devMode);
 	LONG changeDisplaySettings(const wchar_t* deviceName, int width, int height, int refresh_rate);
-	LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, int refresh_rate, bool bApplyIsolated=false);	
+	LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, int refresh_rate, bool bApplyIsolated=false);
+
+	/**
+	 * @brief Arrange several virtual displays in one shot, preserving their relative geometry.
+	 *
+	 * The whole arrangement is placed as a block clear of the displays already on the desktop
+	 * and applied in a single SetDisplayConfig call, because the intermediate states of a
+	 * display-by-display move overlap and Windows refuses those.
+	 *
+	 * @param layout The displays to arrange; every one of them must currently be attached.
+	 * @param refresh_rate Refresh rate in millihertz, applied to all of them.
+	 * @return ERROR_SUCCESS, or a Windows error code.
+	 */
+	LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refresh_rate);
 	std::wstring getPrimaryDisplay();
 	bool setPrimaryDisplay(const wchar_t* primaryDeviceName);
 	bool getDisplayHDRByName(const wchar_t* displayName);
