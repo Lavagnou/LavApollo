@@ -588,6 +588,14 @@ namespace nvhttp {
       BOOST_LOG(info) << "Client ["sv << named_cert_p->name << "] requested "sv
                       << launch_session->virtual_displays.size() << " emulated displays"sv;
     }
+    else if (launch_session->virtual_display) {
+      // The single most confusing outcome to debug from the host side: everything works,
+      // and only one display appears, because the client never asked for more. Saying so
+      // separates a client that did not send a layout from one whose layout we rejected,
+      // which is logged above.
+      BOOST_LOG(info) << "Client ["sv << named_cert_p->name
+                      << "] asked for a virtual display but sent no layout; emulating a single display"sv;
+    }
 #endif
 
     launch_session->client_do_cmds = named_cert_p->do_cmds;

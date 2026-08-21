@@ -343,7 +343,12 @@ namespace proc {
             );
 
             if (display.device_name.empty()) {
-              BOOST_LOG(warning) << "Virtual Display creation failed, or cannot get created display name in time!";
+              // createVirtualDisplay() has already logged which of the two went wrong and
+              // how long it waited; what it cannot know is which display of the layout it
+              // was working on.
+              BOOST_LOG(warning) << "Could not bring up display "sv << (i + 1) << " of "sv
+                                 << displays.size() << " ["sv << display.width << 'x' << display.height
+                                 << ']';
               all_created = false;
               continue;
             }

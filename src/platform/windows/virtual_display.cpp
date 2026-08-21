@@ -15,6 +15,12 @@
 
 #include "virtual_display.h"
 
+// Anything worth knowing when a display fails to come up has to reach sunshine.log.
+// printf() writes to a console nobody is watching, which is what made the first two
+// multi-display failures take an evening to explain.
+#include "src/logging.h"
+#include "src/platform/windows/misc.h"
+
 using namespace SUDOVDA;
 
 namespace VDISPLAY {
@@ -387,7 +393,8 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 
 	for (size_t k = 0; k < layout.size(); k++) {
 		if (modeIndex[k] == NOT_FOUND) {
-			wprintf(L"[SUDOVDA] Display not found while applying layout: %ls\n", layout[k].deviceName.c_str());
+			BOOST_LOG(warning) << "SUDOVDA: display not found while applying layout: "
+			                   << platf::to_utf8(layout[k].deviceName);
 			return ERROR_DEVICE_NOT_CONNECTED;
 		}
 	}
@@ -417,11 +424,11 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 	);
 
 	if (status != ERROR_SUCCESS) {
-		wprintf(L"[SUDOVDA] Failed to apply display layout.\n");
+		BOOST_LOG(warning) << "SUDOVDA: Windows rejected the requested display layout (error " << status << ')';
 		return status;
 	}
 
-	wprintf(L"[SUDOVDA] Display layout applied to %d displays at x offset %d.\n", (int)layout.size(), base_x);
+	BOOST_LOG(info) << "SUDOVDA: laid out " << layout.size() << " displays at x offset " << base_x;
 
 	// Note: the layout's `primary` flag is deliberately not applied to Windows here.
 	// setPrimaryDisplay() writes through CDS_UPDATEREGISTRY, so it would outlive the
@@ -789,7 +796,8 @@ std::wstring createVirtualDisplay(
 
 	VIRTUAL_DISPLAY_ADD_OUT output;
 	if (!AddVirtualDisplay(SUDOVDA_DRIVER_HANDLE, width, height, fps, guid, s_client_name, s_client_uid, output)) {
-		printf("[SUDOVDA] Failed to add virtual display.\n");
+		BOOST_LOG(error) << "SUDOVDA: the driver refused to add a virtual display ("
+		                 << width << 'x' << height << " at " << (fps / 1000.0) << "Hz)";
 		return std::wstring();
 	}
 
@@ -801,12 +809,23 @@ std::wstring createVirtualDisplay(
 	// display exists, we simply do not know its name, so it is neither captured nor laid
 	// out. Wait against a deadline instead, and keep polling at a steady interval once the
 	// backoff has grown.
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	const auto started = std::chrono::steady_clock::now();
+	const auto deadline = started + std::chrono::seconds(5);
 	uint32_t retryInterval = 20;
 	wchar_t deviceName[CCHDEVICENAME]{};
+	auto elapsed_ms = [&started]() {
+		return std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - started).count();
+	};
+
 	while (!GetAddedDisplayName(output, deviceName)) {
 		if (std::chrono::steady_clock::now() >= deadline) {
-			printf("[SUDOVDA] Cannot get name for newly added virtual display!\n");
+			// The display itself was added -- only its name is unknown, so it can be neither
+			// captured nor laid out. Saying how long we waited is what tells the next person
+			// whether the budget is too short or the display never arrived at all.
+			BOOST_LOG(error) << "SUDOVDA: the virtual display was added but Windows had not "
+			                    "attached it after " << elapsed_ms()
+			                 << "ms, so its name is unknown";
 			return std::wstring();
 		}
 		Sleep(retryInterval);
@@ -815,8 +834,9 @@ std::wstring createVirtualDisplay(
 		}
 	}
 
-	wprintf(L"[SUDOVDA] Virtual display added successfully: %ls\n", deviceName);
-	printf("[SUDOVDA] Configuration: W: %d, H: %d, FPS: %d\n", width, height, fps);
+	BOOST_LOG(info) << "SUDOVDA: virtual display attached as " << platf::to_utf8(deviceName)
+	                << " (" << width << 'x' << height << " at " << (fps / 1000.0)
+	                << "Hz) after " << elapsed_ms() << "ms";
 
 	return std::wstring(deviceName);
 }
