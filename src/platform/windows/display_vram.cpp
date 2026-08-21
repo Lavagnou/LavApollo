@@ -1645,6 +1645,29 @@ namespace platf::dxgi {
    * @param config Stream configuration.
    * @param display_names The displays to combine, joined by name_separator.
    */
+  namespace {
+    /**
+     * @brief Where a monitor sits on the desktop, as the window manager sees it now.
+     *
+     * Deliberately not DXGI_OUTPUT_DESC::DesktopCoordinates, even though that is where
+     * the canvas geometry comes from: an IDXGIOutput belongs to a factory snapshot and can
+     * describe a desktop that has since changed. Recording and re-checking both go through
+     * here so the comparison cannot end up straddling two coordinate spaces -- which would
+     * never match, and would rebuild the capture four times a second forever.
+     */
+    bool monitor_rect(HMONITOR monitor, RECT &out) {
+      MONITORINFO mi {};
+      mi.cbSize = sizeof(mi);
+
+      if (!GetMonitorInfoW(monitor, &mi)) {
+        return false;
+      }
+
+      out = mi.rcMonitor;
+      return true;
+    }
+  }  // namespace
+
   int display_composite_vram_t::init(const ::video::config_t &config, const std::string &display_names) {
     auto names = split_display_names(display_names);
     if (names.size() < 2) {
@@ -1723,7 +1746,10 @@ namespace platf::dxgi {
         source->height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
 
         source->monitor = desc.Monitor;
-        source->desktop_rect = desc.DesktopCoordinates;
+        if (!monitor_rect(source->monitor, source->desktop_rect)) {
+          BOOST_LOG(error) << "Failed to locate display ["sv << names[i] << "] on the desktop"sv;
+          return -1;
+        }
 
         // Desktop coordinates for now; rebased onto the canvas once the bounding box of
         // every source is settled.
@@ -1766,7 +1792,10 @@ namespace platf::dxgi {
       }
 
       base_monitor = base_desc.Monitor;
-      base_desktop_rect = base_desc.DesktopCoordinates;
+      if (!monitor_rect(base_monitor, base_desktop_rect)) {
+        BOOST_LOG(error) << "Failed to locate the first display on the desktop"sv;
+        return -1;
+      }
     }
 
     virtual_screen_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -1819,10 +1848,9 @@ namespace platf::dxgi {
     }
 
     auto moved = [](HMONITOR monitor, const RECT &recorded, const char *which) {
-      MONITORINFO mi {};
-      mi.cbSize = sizeof(mi);
+      RECT now {};
 
-      if (!GetMonitorInfoW(monitor, &mi)) {
+      if (!monitor_rect(monitor, now)) {
         // The display is gone. Rebuilding is still the right answer: init() will fail on
         // the missing output and the session ends with a clear reason, rather than the
         // canvas quietly keeping a frozen copy of a display that no longer exists.
@@ -1830,8 +1858,8 @@ namespace platf::dxgi {
         return true;
       }
 
-      if (mi.rcMonitor.left != recorded.left || mi.rcMonitor.top != recorded.top ||
-          mi.rcMonitor.right != recorded.right || mi.rcMonitor.bottom != recorded.bottom) {
+      if (now.left != recorded.left || now.top != recorded.top ||
+          now.right != recorded.right || now.bottom != recorded.bottom) {
         BOOST_LOG(info) << "Composite capture's "sv << which << " display moved; rebuilding"sv;
         return true;
       }
