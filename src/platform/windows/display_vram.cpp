@@ -1722,6 +1722,9 @@ namespace platf::dxgi {
         source->width = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
         source->height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
 
+        source->monitor = desc.Monitor;
+        source->desktop_rect = desc.DesktopCoordinates;
+
         // Desktop coordinates for now; rebased onto the canvas once the bounding box of
         // every source is settled.
         source->canvas_x = source_offset_x;
@@ -1754,6 +1757,21 @@ namespace platf::dxgi {
       return ret;
     }
 
+    {
+      // The inherited display's own rectangle, kept for the same reason as the extras'.
+      DXGI_OUTPUT_DESC base_desc {};
+      if (FAILED(output->GetDesc(&base_desc))) {
+        BOOST_LOG(error) << "Failed to read the base output description for composite capture"sv;
+        return -1;
+      }
+
+      base_monitor = base_desc.Monitor;
+      base_desktop_rect = base_desc.DesktopCoordinates;
+    }
+
+    virtual_screen_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    virtual_screen_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+
     base_canvas_x = base_offset_x - left;
     base_canvas_y = base_offset_y - top;
 
@@ -1779,6 +1797,62 @@ namespace platf::dxgi {
   }
 
   /**
+   * @brief Has the desktop been rearranged under us since the canvas was laid out?
+   *
+   * Asked of the window manager rather than of DXGI: an IDXGIOutput belongs to a factory
+   * snapshot taken before the change, so its description can describe a desktop that no
+   * longer exists, while GetMonitorInfo() always answers about the desktop as it is now.
+   */
+  bool display_composite_vram_t::topology_changed() {
+    // Once every quarter second is far more often than a person can rearrange a desktop,
+    // and keeps a handful of syscalls out of the per-frame path.
+    const auto now = std::chrono::steady_clock::now();
+    if (now < next_topology_check) {
+      return false;
+    }
+    next_topology_check = now + std::chrono::milliseconds(250);
+
+    if (GetSystemMetrics(SM_XVIRTUALSCREEN) != virtual_screen_x ||
+        GetSystemMetrics(SM_YVIRTUALSCREEN) != virtual_screen_y) {
+      BOOST_LOG(info) << "Desktop origin moved; rebuilding composite capture"sv;
+      return true;
+    }
+
+    auto moved = [](HMONITOR monitor, const RECT &recorded, const char *which) {
+      MONITORINFO mi {};
+      mi.cbSize = sizeof(mi);
+
+      if (!GetMonitorInfoW(monitor, &mi)) {
+        // The display is gone. Rebuilding is still the right answer: init() will fail on
+        // the missing output and the session ends with a clear reason, rather than the
+        // canvas quietly keeping a frozen copy of a display that no longer exists.
+        BOOST_LOG(info) << "Composite capture lost its "sv << which << " display"sv;
+        return true;
+      }
+
+      if (mi.rcMonitor.left != recorded.left || mi.rcMonitor.top != recorded.top ||
+          mi.rcMonitor.right != recorded.right || mi.rcMonitor.bottom != recorded.bottom) {
+        BOOST_LOG(info) << "Composite capture's "sv << which << " display moved; rebuilding"sv;
+        return true;
+      }
+
+      return false;
+    };
+
+    if (moved(base_monitor, base_desktop_rect, "first")) {
+      return true;
+    }
+
+    for (auto &source : extra_sources) {
+      if (moved(source->monitor, source->desktop_rect, "additional")) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * @brief Assemble one frame from every display and copy it into a snapshot texture.
    * @param pull_free_image_cb call this to get a new free image from the video subsystem.
    * @param img_out the assembled frame is returned here
@@ -1786,6 +1860,14 @@ namespace platf::dxgi {
    * @param cursor_visible
    */
   capture_e display_composite_vram_t::snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) {
+    // Every offset below was worked out from where the displays sat at init. If they have
+    // moved since, compositing at those offsets puts each display's pixels in the wrong
+    // part of the canvas -- which is a picture shifted across the client's monitors, with
+    // no error anywhere to explain it.
+    if (topology_changed()) {
+      return capture_e::reinit;
+    }
+
     bool have_update = false;
     std::optional<std::chrono::steady_clock::time_point> frame_timestamp;
 

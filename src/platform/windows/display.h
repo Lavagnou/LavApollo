@@ -365,6 +365,11 @@ namespace platf::dxgi {
       int canvas_y;
       int width;
       int height;
+
+      /// Where this display sat when the canvas was laid out, and the handle to ask where
+      /// it sits now. See topology_changed().
+      HMONITOR monitor {};
+      RECT desktop_rect {};
     };
 
     /// Where the inherited display's own pixels land in the canvas.
@@ -372,6 +377,32 @@ namespace platf::dxgi {
     int base_canvas_y = 0;
     int base_width = 0;
     int base_height = 0;
+
+    /// Same pair for the inherited display.
+    HMONITOR base_monitor {};
+    RECT base_desktop_rect {};
+
+    /// Virtual screen origin the canvas offsets were normalised against.
+    int virtual_screen_x = 0;
+    int virtual_screen_y = 0;
+
+    /// Earliest time topology_changed() will do any work again.
+    std::chrono::steady_clock::time_point next_topology_check {};
+
+    /**
+     * @brief Has the desktop been rearranged under us since the canvas was laid out?
+     *
+     * Every source composites at a fixed offset worked out at init from where its display
+     * sat on the desktop. Windows re-origins the whole desktop when the primary display
+     * changes: the displays keep their arrangement relative to each other -- so the host
+     * still looks right -- but every absolute coordinate shifts, and the canvas would keep
+     * being assembled at the old ones.
+     *
+     * Nothing reports this. Losing a display kills its duplication and surfaces as
+     * DXGI_ERROR_ACCESS_LOST, but a mere re-origin kills nothing: every duplication carries
+     * on delivering frames, to the wrong place. So it has to be asked for.
+     */
+    bool topology_changed();
 
     /// unique_ptr because duplication_t declares a destructor and so is not movable.
     std::vector<std::unique_ptr<extra_source_t>> extra_sources;
