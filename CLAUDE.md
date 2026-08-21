@@ -41,6 +41,21 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
     `proc.display_name`, the capture thread and `platf::display()` all take a single name.
   - ⚠️ SudoVDA attaches a **default 1920x1080 monitor** when its adapter first wakes up, so our
     displays are always tracked by the GUID we created them with, never by enumerating the adapter.
+  - ⚠️ **Windows re-origins the whole desktop when the primary display changes.** The emulated
+    displays keep their positions relative to each other -- the host still looks right -- but every
+    absolute coordinate shifts, and nothing reports it: losing a display kills its duplication
+    (`DXGI_ERROR_ACCESS_LOST` -> rebuild), a re-origin kills nothing. So
+    `display_composite_vram_t::topology_changed()` polls monitor rectangles 4x/s and returns
+    `capture_e::reinit`; without it the picture slides across the client's monitors with no error
+    anywhere. Record and re-check both go through the same `GetMonitorInfo()` helper -- mixing it
+    with DXGI's `DesktopCoordinates` would compare two coordinate spaces and rebuild forever.
+  - ⚠️ **`isolated_virtual_display_option` does not disable anything**, despite the name: it only
+    *rearranges* displays around the virtual one (`rearrangeVirtualDisplayForLowerRight`). Nothing
+    in Apollo deactivates the host's own displays, so the emulated ones land *beside* them and the
+    host's monitor stays primary. Making the emulated set take over the desktop means owning a
+    "host left with no display" failure mode, and there is no revert path today -- deliberately not
+    done. Configuring it once in Windows works because `SDC_SAVE_TO_DATABASE` makes Windows
+    remember the arrangement for that set of monitor identities.
 - Send pacing derived from the negotiated stream bitrate rather than a hardcoded 800 Mbps.
 - Video queue drops the oldest frames on overflow instead of flushing.
 - Higher NVENC quality defaults (P4 preset, spatial AQ).
