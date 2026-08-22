@@ -10,6 +10,8 @@
 // standard includes
 #include <algorithm>
 #include <filesystem>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -329,12 +331,37 @@ namespace proc {
             display_uuid.b64[1] ^= (std::uint64_t) i;
             memcpy(&display.guid, &display_uuid, sizeof(GUID));
 
-          // The driver truncates this to 13 characters for the EDID name, so the suffix is
-          // only there to tell the monitors apart in the Windows display settings.
-            auto display_label = multi_display ? device_name + " " + std::to_string(i + 1) : device_name;
+            // Windows keys its saved arrangement on monitor identity, so each emulated display
+            // needs one of its own: distinct within a session, and the same one every session.
+            // Every display used to be given the session's UUID as its serial number, which made
+            // a two-display layout two monitors Windows could not tell apart -- and so could not
+            // place. Single-display sessions keep the old serial: it was never ambiguous, and
+            // changing it would invalidate arrangements users have already saved.
+            auto display_serial = device_uuid_str;
+
+            // The driver cuts both name and serial at 13 characters. The part that tells the
+            // displays apart therefore has to fit inside that -- appending an index to a client
+            // name as long as "HERMES-PC - LavArtemis" put it well past the cut, leaving every
+            // emulated display called "HERMES-PC - L".
+            auto display_label = device_name;
+
+            if (multi_display) {
+              const auto suffix = " " + std::to_string(i + 1);
+
+              std::ostringstream serial;
+              serial << std::hex << std::setw(10) << std::setfill('0')
+                     << ((device_uuid.b64[0] ^ device_uuid.b64[1]) & 0xFFFFFFFFFFULL)
+                     << suffix.substr(1);
+              display_serial = serial.str();
+
+              if (display_label.size() + suffix.size() > 13) {
+                display_label.resize(13 - suffix.size());
+              }
+              display_label += suffix;
+            }
 
             display.device_name = VDISPLAY::createVirtualDisplay(
-              device_uuid_str.c_str(),
+              display_serial.c_str(),
               display_label.c_str(),
               display.width,
               display.height,
@@ -353,9 +380,13 @@ namespace proc {
               continue;
             }
 
+            // The label and serial are logged because that pair is the identity Windows keys a
+            // saved arrangement on. If it differs between two sessions, Windows has nothing to
+            // restore from -- which is the first thing to check when an arrangement is not kept.
             BOOST_LOG(info) << "Virtual Display created at " << display.device_name
                             << " [" << display.width << 'x' << display.height
-                            << " at " << display.x << ',' << display.y << ']';
+                            << " at " << display.x << ',' << display.y << "] as \""
+                            << display_label << "\" serial " << display_serial;
 
             // Don't change display settings when no params are given
             if (launch_session->width && launch_session->height && launch_session->fps) {
