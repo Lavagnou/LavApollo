@@ -32,6 +32,11 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
   one code path. Advertised to clients as `MultiDisplayCapable` in `serverinfo`.
   - `VDISPLAY::applyVirtualDisplayLayout()` places them in **one** `SetDisplayConfig` call —
     moving them one at a time passes through overlapping arrangements, which Windows refuses.
+    ⚠️ It sets only their positions **relative to each other**; the block as a whole stays where it
+    already is. It used to be forced past the rightmost display every session, which silently
+    overwrote any arrangement the user had set up — the geometry does not care where the block
+    lands (capture reports whatever origin it gets), but the user does. It moves only to avoid
+    overlapping a display outside the layout, which Windows would reject anyway.
   - `display_composite_vram_t` (in `display_vram.cpp`) captures them all into one frame the size of
     their bounding box. ⚠️ **The frame must stay geometrically identical to that region of the
     desktop**: `make_port()` in `video.cpp` derives the client's coordinate plane from the captured
