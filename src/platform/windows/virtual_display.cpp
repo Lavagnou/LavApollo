@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <vector>
@@ -339,13 +340,16 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 	std::vector<size_t> modeIndex(layout.size(), NOT_FOUND);
 	std::vector<size_t> pathIndex(layout.size(), NOT_FOUND);
 
-	// The emulated displays are placed as one block to the right of everything already on
-	// the desktop. Only their positions relative to each other carry meaning: the client
-	// normalised its layout to start at (0,0), and capture reports whatever desktop origin
-	// the block lands on. So any free region will do, and "past the rightmost display" is
-	// free by construction -- while reusing (0,0) would collide with the existing primary,
-	// which Windows rejects outright.
+	// Only the emulated displays' positions relative to each other carry meaning: the client
+	// normalised its layout to start at (0,0), and capture reports whatever desktop origin the
+	// block lands on. Where the block sits as a whole is therefore the user's business, not ours.
+	//
+	// So keep it where it already is, and move it only when that would overlap a display we are
+	// not laying out. Forcing it past the rightmost display every session overwrote whatever
+	// arrangement the user had set up in Windows, which was never ours to discard.
 	int base_x = 0;
+	int base_y = 0;
+	std::vector<RECT> other_rects;
 
 	for (UINT32 i = 0; i < pathCount; i++) {
 		DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName = {};
@@ -379,11 +383,20 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 					modeIndex[slot] = j;
 					pathIndex[slot] = i;
 				} else {
-					// A display we are not laying out: leave it alone, but start our block
-					// clear of it.
-					int right = modeArray[j].sourceMode.position.x + (int)modeArray[j].sourceMode.width;
-					if (right > base_x) {
-						base_x = right;
+					// A display we are not laying out: leave it alone, but remember where it is, so
+					// we can tell whether the block would land on top of it -- and where to move the
+					// block to if it would.
+					const auto &mode = modeArray[j].sourceMode;
+					const RECT rect {
+						mode.position.x,
+						mode.position.y,
+						mode.position.x + (LONG) mode.width,
+						mode.position.y + (LONG) mode.height
+					};
+					other_rects.push_back(rect);
+
+					if (rect.right > base_x) {
+						base_x = (int) rect.right;
 					}
 				}
 				break;
@@ -399,6 +412,46 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 		}
 	}
 
+	// Where the block sits right now. If Windows restored an arrangement the user saved, this is
+	// already where they want it, and the layout below becomes a no-op that keeps it there.
+	{
+		auto origin_x = modeArray[modeIndex[0]].sourceMode.position.x - layout[0].x;
+		auto origin_y = modeArray[modeIndex[0]].sourceMode.position.y - layout[0].y;
+
+		for (size_t k = 1; k < layout.size(); k++) {
+			origin_x = std::min(origin_x, modeArray[modeIndex[k]].sourceMode.position.x - layout[k].x);
+			origin_y = std::min(origin_y, modeArray[modeIndex[k]].sourceMode.position.y - layout[k].y);
+		}
+
+		// Windows rejects an arrangement where two displays overlap, so a block that would land on
+		// one has to go somewhere free instead. Past the rightmost display is free by construction.
+		bool clashes = false;
+		for (size_t k = 0; k < layout.size() && !clashes; k++) {
+			const RECT rect {
+				origin_x + layout[k].x,
+				origin_y + layout[k].y,
+				origin_x + layout[k].x + layout[k].width,
+				origin_y + layout[k].y + layout[k].height
+			};
+
+			for (const auto &other : other_rects) {
+				if (rect.left < other.right && other.left < rect.right &&
+				    rect.top < other.bottom && other.top < rect.bottom) {
+					clashes = true;
+					break;
+				}
+			}
+		}
+
+		if (clashes) {
+			BOOST_LOG(info) << "SUDOVDA: the emulated displays overlap another display where they are, "
+			                   "moving them clear of it";
+		} else {
+			base_x = (int) origin_x;
+			base_y = (int) origin_y;
+		}
+	}
+
 	// Every rectangle moves in the same SetDisplayConfig call. Applying them one at a time
 	// would walk through intermediate arrangements where two displays overlap, and Windows
 	// rejects those rather than tolerating them in passing.
@@ -406,7 +459,7 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 		auto* sourceMode = &modeArray[modeIndex[k]].sourceMode;
 
 		sourceMode->position.x = base_x + layout[k].x;
-		sourceMode->position.y = layout[k].y;
+		sourceMode->position.y = base_y + layout[k].y;
 		sourceMode->width = layout[k].width;
 		sourceMode->height = layout[k].height;
 
@@ -428,7 +481,7 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 		return status;
 	}
 
-	BOOST_LOG(info) << "SUDOVDA: laid out " << layout.size() << " displays at x offset " << base_x;
+	BOOST_LOG(info) << "SUDOVDA: laid out " << layout.size() << " displays at " << base_x << ',' << base_y;
 
 	// Note: the layout's `primary` flag is deliberately not applied to Windows here.
 	// setPrimaryDisplay() writes through CDS_UPDATEREGISTRY, so it would outlive the
