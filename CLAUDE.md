@@ -49,13 +49,24 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
     `capture_e::reinit`; without it the picture slides across the client's monitors with no error
     anywhere. Record and re-check both go through the same `GetMonitorInfo()` helper -- mixing it
     with DXGI's `DesktopCoordinates` would compare two coordinate spaces and rebuild forever.
+  - ⚠️ **Windows cannot remember an arrangement across sessions**, so do not design as if it could.
+    SudoVDA allocates a fresh target id per add, and the monitor's device instance is
+    `DISPLAY\SMKD1CE\...&UID<n>` -- so every session's emulated displays are, to Windows, monitors
+    it has never seen. (Four sessions from one client left `UID260/262/263/264`.) They are also
+    indistinguishable from each other: the EDID name is truncated to 13 chars, which cuts the
+    " 1"/" 2" suffix, and every display of a session is given the *same* serial number.
+    `SDC_SAVE_TO_DATABASE` therefore has nothing to key a restore on. Arrangement has to be applied
+    by us each session, which `applyVirtualDisplayLayout()` does.
   - ⚠️ **`isolated_virtual_display_option` does not disable anything**, despite the name: it only
-    *rearranges* displays around the virtual one (`rearrangeVirtualDisplayForLowerRight`). Nothing
-    in Apollo deactivates the host's own displays, so the emulated ones land *beside* them and the
-    host's monitor stays primary. Making the emulated set take over the desktop means owning a
-    "host left with no display" failure mode, and there is no revert path today -- deliberately not
-    done. Configuring it once in Windows works because `SDC_SAVE_TO_DATABASE` makes Windows
-    remember the arrangement for that set of monitor identities.
+    *rearranges* displays around the virtual one (`rearrangeVirtualDisplayForLowerRight`). The real
+    mechanism for taking over the desktop is upstream's `dd_configuration_option`
+    (`ensure_active` / `ensure_primary` / `ensure_only_display`, default **disabled**), which comes
+    with persistence and revert via libdisplaydevice. Two things stand in the way of using it with
+    an emulated layout: `config::video.output_name` is set to the **first** virtual display only
+    (`process.cpp:458`), so `ensure_only_display` would disable the *other* emulated displays; and
+    `process.cpp:470` calls `reset_persistence()` for any virtual-display session, discarding the
+    revert state -- harmless while the option is `disabled`, but it would strand a user's real
+    displays turned off if they enabled it.
 - Send pacing derived from the negotiated stream bitrate rather than a hardcoded 800 Mbps.
 - Video queue drops the oldest frames on overflow instead of flushing.
 - Higher NVENC quality defaults (P4 preset, spatial AQ).
