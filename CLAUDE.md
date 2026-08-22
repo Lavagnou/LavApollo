@@ -49,14 +49,16 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
     `capture_e::reinit`; without it the picture slides across the client's monitors with no error
     anywhere. Record and re-check both go through the same `GetMonitorInfo()` helper -- mixing it
     with DXGI's `DesktopCoordinates` would compare two coordinate spaces and rebuild forever.
-  - ⚠️ **Windows cannot remember an arrangement across sessions**, so do not design as if it could.
-    SudoVDA allocates a fresh target id per add, and the monitor's device instance is
-    `DISPLAY\SMKD1CE\...&UID<n>` -- so every session's emulated displays are, to Windows, monitors
-    it has never seen. (Four sessions from one client left `UID260/262/263/264`.) They are also
-    indistinguishable from each other: the EDID name is truncated to 13 chars, which cuts the
-    " 1"/" 2" suffix, and every display of a session is given the *same* serial number.
-    `SDC_SAVE_TO_DATABASE` therefore has nothing to key a restore on. Arrangement has to be applied
-    by us each session, which `applyVirtualDisplayLayout()` does.
+  - ⚠️ **Monitor identity is what Windows keys a saved arrangement on**, and every emulated display
+    used to be given the session UUID as its serial -- so a two-display layout was two monitors
+    Windows could not tell apart, and an arrangement configured once was never restored. Each
+    display now gets its own serial (session identity + index), stable across sessions. The EDID
+    name has the same 13-character limit, which used to cut the " 1"/" 2" suffix off a long client
+    name; room is now reserved for it. Single-display sessions deliberately keep the old serial.
+    ⚠️ SudoVDA still allocates a fresh target id per add (`DISPLAY\SMKD1CE\...&UID<n>`, four
+    sessions from one client left `UID260/262/263/264`), which is in the driver binary and not
+    something we control -- so never *rely* on Windows restoring; `applyVirtualDisplayLayout()`
+    applies the arrangement among the emulated displays every session regardless.
   - ⚠️ **`isolated_virtual_display_option` does not disable anything**, despite the name: it only
     *rearranges* displays around the virtual one (`rearrangeVirtualDisplayForLowerRight`). The real
     mechanism for taking over the desktop is upstream's `dd_configuration_option`
