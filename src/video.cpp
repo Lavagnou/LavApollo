@@ -1390,6 +1390,32 @@ namespace video {
               // only support a single display session per device/application.
               disp.reset();
 
+              // A composite name is never in the enumerated list -- it names several displays at
+              // once -- so refresh_displays() below cannot find it, would report it as "no longer
+              // present", and would silently drop us onto whichever display sorts first. That
+              // single display then gets scaled into a stream still sized for the whole
+              // arrangement: a picture centred across the client's monitors, with the other
+              // emulated displays simply gone. Worse, it overwrites the composite name below, so
+              // no later reinit can recover it either.
+              //
+              // Try it first, exactly as the initial setup above does. reset_display() retries
+              // twice with a sleep, which is what makes this survive a topology change still in
+              // progress -- outputs can be briefly unavailable, and treating that as a lost
+              // arrangement would throw the composite away for good.
+              //
+              // Not when a display switch is pending: that asks for a specific display by index,
+              // which only refresh_displays() can resolve. It also keeps display_names non-empty
+              // for the clamp below, which would otherwise be clamp(x, 0, -1).
+              if (!switch_display_event->peek() && platf::is_composite_display_name(proc::proc.display_name)) {
+                reset_display(disp, encoder.platform_formats->dev_type, proc::proc.display_name, capture_ctxs.front().config);
+                if (disp) {
+                  break;
+                }
+
+                BOOST_LOG(warning) << "Could not recapture ["sv << proc::proc.display_name
+                                   << "], falling back to a single display"sv;
+              }
+
               // Refresh display names since a display removal might have caused the reinitialization
               refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, proc::proc.display_name);
 
