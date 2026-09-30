@@ -26,3 +26,32 @@ INSTANTIATE_TEST_SUITE_P(
     std::make_tuple(std::string(128, 'a'), std::string(63, 'a'))
   )
 );
+
+TEST(StreamingBindTests, SucceedsOnceEveryServerBound) {
+  net::expect_streaming_binds(2);
+  net::report_streaming_bind(true);
+  net::report_streaming_bind(true);
+  EXPECT_TRUE(net::wait_for_streaming_binds(std::chrono::milliseconds(0), nullptr));
+}
+
+TEST(StreamingBindTests, FailsAsSoonAsOneServerFails) {
+  net::expect_streaming_binds(3);
+  net::report_streaming_bind(true);
+  net::report_streaming_bind(false);
+  EXPECT_FALSE(net::wait_for_streaming_binds(std::chrono::seconds(5), nullptr));
+}
+
+TEST(StreamingBindTests, TimesOutWhenAServerNeverReports) {
+  net::expect_streaming_binds(2);
+  net::report_streaming_bind(true);
+  EXPECT_FALSE(net::wait_for_streaming_binds(std::chrono::milliseconds(50), nullptr));
+}
+
+TEST(StreamingBindTests, AbortStopsTheWait) {
+  net::expect_streaming_binds(1);
+  auto start = std::chrono::steady_clock::now();
+  EXPECT_FALSE(net::wait_for_streaming_binds(std::chrono::seconds(30), [] {
+    return true;
+  }));
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
+}

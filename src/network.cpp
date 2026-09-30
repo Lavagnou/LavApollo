@@ -5,6 +5,8 @@
 // standard includes
 #include <algorithm>
 #include <cerrno>
+#include <condition_variable>
+#include <mutex>
 #include <sstream>
 
 // local includes
@@ -245,6 +247,47 @@ namespace net {
 #endif
     }
   }  // namespace
+
+  namespace {
+    std::mutex streaming_bind_mutex;
+    std::condition_variable streaming_bind_cv;
+    int streaming_binds_expected = 0;
+    int streaming_binds_succeeded = 0;
+    int streaming_binds_failed = 0;
+  }  // namespace
+
+  void expect_streaming_binds(int count) {
+    std::lock_guard lg {streaming_bind_mutex};
+    streaming_binds_expected = count;
+    streaming_binds_succeeded = 0;
+    streaming_binds_failed = 0;
+  }
+
+  void report_streaming_bind(bool success) {
+    {
+      std::lock_guard lg {streaming_bind_mutex};
+      ++(success ? streaming_binds_succeeded : streaming_binds_failed);
+    }
+    streaming_bind_cv.notify_all();
+  }
+
+  bool wait_for_streaming_binds(std::chrono::milliseconds timeout, const std::function<bool()> &abort) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    auto settled = [] {
+      return streaming_binds_failed > 0 || streaming_binds_succeeded >= streaming_binds_expected;
+    };
+
+    std::unique_lock ul {streaming_bind_mutex};
+    while (!settled()) {
+      if ((abort && abort()) || std::chrono::steady_clock::now() >= deadline) {
+        return false;
+      }
+      // Short slices, so a shutdown during startup is not held up by the full timeout.
+      streaming_bind_cv.wait_for(ul, std::chrono::milliseconds(100));
+    }
+
+    return streaming_binds_failed == 0;
+  }
 
   port_validation_t validate_stream_ports() {
     boost::asio::io_context ioc;

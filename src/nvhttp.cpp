@@ -1903,9 +1903,18 @@ namespace nvhttp {
     http_server.config.port = port_http;
 
     auto accept_and_run = [&](auto *http_server, std::uint16_t port, std::string_view role) {
+      // start() calls this once it is bound and listening, before serving.
+      bool bound = false;
       try {
-        http_server->start();
+        http_server->start([&bound](unsigned short) {
+          bound = true;
+          net::report_streaming_bind(true);
+        });
       } catch (boost::system::system_error &err) {
+        if (!bound) {
+          net::report_streaming_bind(false);
+        }
+
         // It's possible the exception gets thrown after calling http_server->stop() from a different thread
         if (shutdown_event->peek()) {
           return;
@@ -1915,6 +1924,10 @@ namespace nvhttp {
         // Do not raise a global shutdown: the Web UI must stay up to surface this error.
         return;
       } catch (std::exception &err) {
+        if (!bound) {
+          net::report_streaming_bind(false);
+        }
+
         // Safety net so no exception can escape a std::thread and trigger std::terminate/abort.
         if (shutdown_event->peek()) {
           return;

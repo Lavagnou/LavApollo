@@ -5,7 +5,9 @@
 #pragma once
 
 // standard includes
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -77,6 +79,27 @@ namespace net {
    *          includes a leading separator so it can be appended after err.what().
    */
   std::string bind_error_explanation(const boost::system::error_code &ec);
+
+  /**
+   * @brief Declare how many streaming servers are about to bind (resets the tally).
+   *
+   * The host must only be advertised (mDNS, UPnP) once those servers actually listen: the
+   * pre-flight probe runs earlier, and a port can be taken in between.
+   */
+  void expect_streaming_binds(int count);
+
+  /**
+   * @brief Report the outcome of one streaming server's bind.
+   */
+  void report_streaming_bind(bool success);
+
+  /**
+   * @brief Wait until every expected streaming server has bound.
+   * @param timeout Give up after this long.
+   * @param abort Polled while waiting; returning true stops the wait early (shutdown).
+   * @return true only if all of them bound successfully.
+   */
+  bool wait_for_streaming_binds(std::chrono::milliseconds timeout, const std::function<bool()> &abort);
 
   using host_t = util::safe_ptr<ENetHost, free_host>;
   using peer_t = ENetPeer *;
