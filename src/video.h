@@ -373,4 +373,10 @@ namespace video {
    * @warning This is only safe to call when there is no client actively streaming.
    */
   int probe_encoders();
+
+  /**
+   * @brief Whether the encoder chosen by the last probe can change its bitrate mid-stream
+   *        (see encode_session_t::update_bitrate()).
+   */
+  bool encoder_supports_bitrate_change();
 }  // namespace video
