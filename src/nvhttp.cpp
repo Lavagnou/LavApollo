@@ -1890,7 +1890,14 @@ namespace nvhttp {
     https_server.resource["^/actions/clipboard$"]["GET"] = getClipboard;
     https_server.resource["^/actions/clipboard$"]["POST"] = setClipboard;
 
+#ifdef _WIN32
+    // SO_REUSEADDR on Windows lets a listener share a port another process is actively using;
+    // without it the bind fails instead and the host is not advertised (see main.cpp).
+    // Same rule as net::set_listener_reuse().
+    https_server.config.reuse_address = false;
+#else
     https_server.config.reuse_address = true;
+#endif
     https_server.config.address = net::af_to_any_address_string(address_family);
     https_server.config.port = port_https;
 
@@ -1898,7 +1905,14 @@ namespace nvhttp {
     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
     http_server.resource["^/pair$"]["GET"] = pair<SimpleWeb::HTTP>;
 
+#ifdef _WIN32
+    // SO_REUSEADDR on Windows lets a listener share a port another process is actively using;
+    // without it the bind fails instead and the host is not advertised (see main.cpp).
+    // Same rule as net::set_listener_reuse().
+    http_server.config.reuse_address = false;
+#else
     http_server.config.reuse_address = true;
+#endif
     http_server.config.address = net::af_to_any_address_string(address_family);
     http_server.config.port = port_http;
 

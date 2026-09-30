@@ -226,26 +226,6 @@ namespace net {
       {11, "UDP", "audio stream"},
     };
 
-    /**
-     * Make a probe socket fail to bind wherever the real server would.
-     *
-     * On POSIX, SO_REUSEADDR only lets a socket reuse a port left in TIME_WAIT, which is what
-     * the real servers do too. On Windows it means something else entirely: permission to bind
-     * a port another process is *actively* using (unless that process asked for exclusivity).
-     * With it, the probe reported ports held by another program as free, and the host was
-     * advertised before its real bind failed. SO_EXCLUSIVEADDRUSE makes the probe honest.
-     */
-    template<class Socket>
-    void set_probe_exclusive(Socket &socket, boost::system::error_code &ec) {
-#ifdef _WIN32
-      BOOL exclusive = TRUE;
-      if (setsockopt(socket.native_handle(), SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *) &exclusive, sizeof(exclusive))) {
-        ec = boost::system::error_code(WSAGetLastError(), boost::system::system_category());
-      }
-#else
-      socket.set_option(boost::asio::socket_base::reuse_address {true}, ec);
-#endif
-    }
   }  // namespace
 
   namespace {
@@ -309,7 +289,7 @@ namespace net {
         ip::tcp::acceptor acc(ioc);
         acc.open(is_v4 ? ip::tcp::v4() : ip::tcp::v6(), ec);
         if (!ec) {
-          set_probe_exclusive(acc, ec);
+          set_exclusive_bind(acc, ec);
           if (!ec) acc.bind(ip::tcp::endpoint(is_v4 ? ip::tcp::v4() : ip::tcp::v6(), port), ec);
           boost::system::error_code ignored;
           acc.close(ignored);
@@ -318,7 +298,7 @@ namespace net {
         ip::udp::socket sock(ioc);
         sock.open(is_v4 ? ip::udp::v4() : ip::udp::v6(), ec);
         if (!ec) {
-          set_probe_exclusive(sock, ec);
+          set_exclusive_bind(sock, ec);
           if (!ec) sock.bind(ip::udp::endpoint(is_v4 ? ip::udp::v4() : ip::udp::v6(), port), ec);
           boost::system::error_code ignored;
           sock.close(ignored);

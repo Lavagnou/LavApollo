@@ -410,7 +410,12 @@ namespace rtsp_stream {
         return -1;
       }
 
-      acceptor.set_option(boost::asio::socket_base::reuse_address {true});
+      // No SO_REUSEADDR on Windows: there it would let this bind succeed on a port another
+      // process is using, and the host would be advertised with RTSP shared with it.
+      net::set_listener_reuse(acceptor, ec);
+      if (ec) {
+        return -1;
+      }
 
       acceptor.bind(tcp::endpoint(af == net::IPV4 ? tcp::v4() : tcp::v6(), port), ec);
       if (ec) {
