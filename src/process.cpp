@@ -409,13 +409,14 @@ namespace proc {
 
         bool multi_display = displays.size() > 1;
 
-        if (!create_displays() && multi_display) {
-          // A layout missing a display is the worst possible outcome: capture would fall
-          // back to whichever single display did come up, and the client would letterbox
-          // that one into a canvas sized for the whole arrangement -- a strip of picture
-          // on the wrong monitor and nothing on the others. One display covering the whole
-          // canvas is wrong in a way the user can actually read, so start over as that.
-          BOOST_LOG(warning) << "Not every virtual display came up; falling back to a single display for the whole layout"sv;
+        // A layout that did not fully materialise is the worst possible outcome: capture would
+        // fall back to whichever single display did come up, or composite displays sitting where
+        // Windows happened to put them, and the client would get a picture that does not match
+        // the canvas it is rendering -- a strip on the wrong monitor, or the arrangement scaled
+        // and shuffled. One display covering the whole canvas is wrong in a way the user can
+        // actually read, so start over as that.
+        auto fall_back_to_single_display = [&](std::string_view why) {
+          BOOST_LOG(warning) << why << "; falling back to a single display for the whole layout"sv;
 
           for (const auto &display : displays) {
             VDISPLAY::removeVirtualDisplay(display.guid);
@@ -431,6 +432,10 @@ namespace proc {
           multi_display = false;
 
           create_displays();
+        };
+
+        if (!create_displays() && multi_display) {
+          fall_back_to_single_display("Not every virtual display came up"sv);
         }
 
         // Windows drops each new display wherever it likes, so the arrangement the client
@@ -439,16 +444,11 @@ namespace proc {
         if (multi_display) {
           std::vector<VDISPLAY::LayoutEntry> layout;
           for (const auto &display : displays) {
-            if (display.device_name.empty()) {
-              continue;
-            }
             layout.push_back({display.device_name, display.x, display.y, display.width, display.height, display.primary});
           }
 
-          if (layout.size() != displays.size()) {
-            BOOST_LOG(warning) << "Not every virtual display came up; skipping layout to avoid a partial arrangement"sv;
-          } else if (VDISPLAY::applyVirtualDisplayLayout(layout, target_fps) != ERROR_SUCCESS) {
-            BOOST_LOG(warning) << "Failed to arrange the virtual displays as the client requested"sv;
+          if (auto status = VDISPLAY::applyVirtualDisplayLayout(layout, target_fps); status != ERROR_SUCCESS) {
+            fall_back_to_single_display("Windows refused the requested display arrangement (error "s + std::to_string(status) + ')');
           } else {
             BOOST_LOG(info) << "Arranged "sv << layout.size() << " virtual displays as requested"sv;
           }
