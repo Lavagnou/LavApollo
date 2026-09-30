@@ -257,6 +257,12 @@ namespace http {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);  // GitHub assets redirect to a CDN
+    // A download may legitimately take minutes, so no overall cap -- but a stalled one must
+    // fail rather than hold the updater in "downloading" forever.
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1024L);  // bytes/s
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);  // seconds
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);  // required for XFERINFOFUNCTION to be called
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress_cb);
 #ifdef _WIN32
@@ -292,6 +298,10 @@ namespace http {
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "LavApollo");  // GitHub API rejects requests without a User-Agent
+    // Called from Web UI request handlers: offline, an unbounded request would hang the page
+    // (and a server thread) until the OS gave up on the TCP connection.
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
 #ifdef _WIN32
     curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
 #endif
