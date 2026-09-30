@@ -1459,6 +1459,8 @@ namespace stream {
     // dumping the entire queue, which freezes the stream for several hundred ms.
     packets->set_overflow_policy(safe::queue_t<video::packet_t>::overflow_policy_e::drop_oldest);
     std::uint64_t dropped_packets_seen = 0;
+    std::uint64_t dropped_since_idr = 0;
+    std::chrono::steady_clock::time_point last_overflow_idr {};
 
     // Video traffic is sent on this thread
     platf::adjust_thread_priority(platf::thread_priority_e::high);
@@ -1490,14 +1492,30 @@ namespace stream {
       auto lowseq = session->video.lowseq;
 
       // Frames discarded on queue overflow leave a gap in the frame sequence.
-      // Request an IDR right away so the client recovers without having to
-      // detect the gap and ask for reference frame invalidation itself.
+      // Request an IDR so the client recovers without having to detect the gap
+      // and ask for reference frame invalidation itself.
+      //
+      // At most once per window, though: an overflow means the link cannot keep
+      // up, and under sustained overflow a request per dropped frame turned every
+      // frame into an IDR -- five to ten times larger -- which is the surest way
+      // to make the congestion worse. Drops inside the window are counted and
+      // reported with the next request.
       auto dropped_packets = packets->dropped();
       if (dropped_packets != dropped_packets_seen) {
-        BOOST_LOG(warning) << "Video packet queue overflowed, dropped "sv << (dropped_packets - dropped_packets_seen)
-                           << " encoded frames; requesting IDR"sv;
+        dropped_since_idr += dropped_packets - dropped_packets_seen;
         dropped_packets_seen = dropped_packets;
-        session->video.idr_events->raise(true);
+      }
+
+      if (dropped_since_idr > 0) {
+        constexpr auto overflow_idr_interval = 500ms;
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_overflow_idr >= overflow_idr_interval) {
+          BOOST_LOG(warning) << "Video packet queue overflowed, dropped "sv << dropped_since_idr
+                             << " encoded frames; requesting IDR"sv;
+          dropped_since_idr = 0;
+          last_overflow_idr = now;
+          session->video.idr_events->raise(true);
+        }
       }
 
       std::string_view payload {(char *) packet->data(), packet->data_size()};
