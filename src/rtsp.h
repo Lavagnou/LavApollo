@@ -27,7 +27,6 @@ namespace stream {
 namespace rtsp_stream {
   constexpr auto RTSP_SETUP_PORT = 21;
 
-#ifdef _WIN32
   /**
    * @brief Upper bound on the displays a client may ask us to emulate.
    *
@@ -37,22 +36,40 @@ namespace rtsp_stream {
   constexpr std::size_t MAX_VIRTUAL_DISPLAYS = 4;
 
   /**
-   * @brief One emulated display of a client's monitor layout.
+   * @brief Largest coordinate or size accepted in a client's display layout.
    *
-   * Rectangles live in "canvas" space: the client normalises its physical monitor layout
-   * so the bounding box starts at (0,0), and sends that bounding box as `mode=`. Keeping
-   * the canvas geometrically identical to the host desktop is deliberate -- it is what
-   * lets absolute mouse, touch and pen coordinates map straight through with no protocol
-   * change at all, because make_port() in video.cpp derives the client plane from the
-   * captured display's own offset and size.
+   * Well past any real monitor (16K is 15360 wide), and small enough that adding an
+   * origin to a size can never overflow an int.
    */
-  struct virtual_display_t {
-    GUID guid {};
+  constexpr int MAX_LAYOUT_COORDINATE = 16384;
+
+  /**
+   * @brief Where one display of a client's monitor layout sits, in "canvas" space.
+   *
+   * The client normalises its physical monitor layout so the bounding box starts at
+   * (0,0), and sends that bounding box as `mode=`. Keeping the canvas geometrically
+   * identical to the host desktop is deliberate -- it is what lets absolute mouse, touch
+   * and pen coordinates map straight through with no protocol change at all, because
+   * make_port() in video.cpp derives the client plane from the captured display's own
+   * offset and size.
+   *
+   * Portable on purpose, so that parsing and validating the layout -- untrusted input --
+   * can be tested on every platform.
+   */
+  struct display_layout_rect_t {
     int x {};
     int y {};
     int width {};
     int height {};
     bool primary {};
+  };
+
+#ifdef _WIN32
+  /**
+   * @brief One emulated display of a client's monitor layout.
+   */
+  struct virtual_display_t: display_layout_rect_t {
+    GUID guid {};
 
     /// `\\.\DISPLAYn`, filled in by proc_t::execute() once the display actually exists.
     std::wstring device_name;
