@@ -50,6 +50,7 @@
 
 namespace updater {
   using namespace std::literals;
+  using namespace detail;
 
   namespace {
     constexpr auto LATEST_RELEASE_URL = "https://api.github.com/repos/Lavagnou/LavApollo/releases/latest";
@@ -75,14 +76,9 @@ namespace updater {
     // Pattern matched against GitHub release asset names to pick the Windows installer.
     constexpr auto INSTALLER_SUFFIX = "-Windows-installer.exe";
 
-    /// Parsed semantic version (major.minor.patch); prerelease/build metadata is ignored.
-    struct semver_t {
-      int major = 0;
-      int minor = 0;
-      int patch = 0;
-      bool valid = false;
-    };
+  }  // namespace
 
+  namespace detail {
     semver_t
     parse_semver(const std::string &s) {
       semver_t v;
@@ -95,6 +91,7 @@ namespace updater {
 
       int parts[3] = {0, 0, 0};
       int idx = 0;
+      bool any_digit = false;
       std::string num;
       auto flush = [&]() {
         if (idx < 3 && !num.empty()) parts[idx++] = std::atoi(num.c_str());
@@ -106,6 +103,7 @@ namespace updater {
         }
         else if (std::isdigit(static_cast<unsigned char>(c))) {
           num += c;
+          any_digit = true;
         }
         else {
           return v;  // unexpected character → not a clean numeric version
@@ -115,7 +113,8 @@ namespace updater {
       v.major = parts[0];
       v.minor = parts[1];
       v.patch = parts[2];
-      v.valid = true;
+      // An empty tag (a release object without tag_name) is not version 0.0.0.
+      v.valid = any_digit;
       return v;
     }
 
@@ -126,6 +125,9 @@ namespace updater {
       if (a.minor != b.minor) return a.minor > b.minor;
       return a.patch > b.patch;
     }
+  }  // namespace detail
+
+  namespace {
 
     /**
      * SHA-256 of everything `read_chunk` yields, as a lowercase hex string, or empty on error.
@@ -313,7 +315,9 @@ namespace updater {
     }
 #endif
 
-    /// Extract the expected hash for `installer_name` from a sha256sums file body.
+  }  // namespace
+
+  namespace detail {
     std::string
     extract_expected_sha(const std::string &sums, const std::string &installer_name) {
       std::istringstream iss(sums);
@@ -323,10 +327,18 @@ namespace updater {
         std::string hash, fname;
         if (!(ls >> hash >> fname)) continue;
         if (!fname.empty() && fname.front() == '*') fname.erase(0, 1);  // binary-mode marker
-        if (fname == installer_name && hash.size() == 64) return hash;
+        if (fname == installer_name && hash.size() == 64 &&
+            std::all_of(hash.begin(), hash.end(), [](unsigned char c) {
+              return std::isxdigit(c);
+            })) {
+          return hash;
+        }
       }
       return {};
     }
+  }  // namespace detail
+
+  namespace {
 
     /// The mutable pipeline state. Atomics for the hot path (progress polling), mutex for the strings.
     struct state_t {

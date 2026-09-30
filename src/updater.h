@@ -78,6 +78,26 @@ namespace updater {
   /// Whether this process is managed by the Apollo service (Windows). Always false on other platforms.
   bool is_service_managed();
 
+  /// Pure helpers, exposed for tests.
+  namespace detail {
+    /// Parsed semantic version (major.minor.patch); prerelease/build metadata is ignored.
+    struct semver_t {
+      int major = 0;
+      int minor = 0;
+      int patch = 0;
+      bool valid = false;
+    };
+
+    /// Parse "1.2.3", "v1.2.3", "1.2.3-rc.1+build"; `valid` is false for anything else.
+    semver_t parse_semver(const std::string &s);
+
+    /// @return true if `a` is strictly newer than `b`.
+    bool newer_than(const semver_t &a, const semver_t &b);
+
+    /// The SHA-256 listed for `installer_name` in a sha256sum-style file, or empty if absent.
+    std::string extract_expected_sha(const std::string &sums, const std::string &installer_name);
+  }  // namespace detail
+
   /// Reset the pipeline back to idle so a failed operation can be retried.
   void reset();
 
