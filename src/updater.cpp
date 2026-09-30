@@ -199,6 +199,38 @@ namespace updater {
     }
 
     /**
+     * The `updates` folder next to the executable (Windows), or under the config directory.
+     * Not created here. On failure `ec` is set and the path is empty.
+     */
+    std::filesystem::path
+    updates_directory(std::error_code &ec) {
+#ifdef _WIN32
+      // Grown until the whole path fits: MAX_PATH is not a limit on install locations, and a
+      // truncated path would put the staging folder somewhere else entirely.
+      std::wstring exe_path(MAX_PATH, L'\0');
+      while (true) {
+        DWORD len = GetModuleFileNameW(nullptr, exe_path.data(), (DWORD) exe_path.size());
+        if (len == 0) {
+          ec = std::error_code((int) GetLastError(), std::system_category());
+          return {};
+        }
+        if (len < exe_path.size()) {
+          exe_path.resize(len);
+          break;
+        }
+        if (exe_path.size() >= 32768) {
+          ec = std::make_error_code(std::errc::filename_too_long);
+          return {};
+        }
+        exe_path.resize(exe_path.size() * 2);
+      }
+      return std::filesystem::path {exe_path}.remove_filename() / L"updates";
+#else
+      return platf::appdata() / "updates";
+#endif
+    }
+
+    /**
      * Directory the installer is downloaded into, created if needed.
      *
      * On Windows this is an `updates` folder next to the executable -- under Program Files for
@@ -214,9 +246,10 @@ namespace updater {
     std::filesystem::path
     staging_directory(std::error_code &ec) {
 #ifdef _WIN32
-      WCHAR exe_path[MAX_PATH];
-      GetModuleFileNameW(nullptr, exe_path, _countof(exe_path));
-      auto dir = std::filesystem::path {exe_path}.remove_filename() / L"updates";
+      auto dir = updates_directory(ec);
+      if (ec) {
+        return {};
+      }
 
       std::filesystem::remove_all(dir, ec);
       if (ec) {
@@ -244,7 +277,10 @@ namespace updater {
       }
       return dir;
 #else
-      auto dir = platf::appdata() / "updates";
+      auto dir = updates_directory(ec);
+      if (ec) {
+        return {};
+      }
       std::filesystem::create_directories(dir, ec);
       return ec ? std::filesystem::path {} : dir;
 #endif
@@ -664,13 +700,11 @@ namespace updater {
       std::filesystem::remove(tmp / LEGACY_STAGING_FILENAME, ec);
     }
 
-#ifdef _WIN32
-    WCHAR exe_path[MAX_PATH];
-    GetModuleFileNameW(nullptr, exe_path, _countof(exe_path));
-    auto dir = std::filesystem::path {exe_path}.remove_filename() / L"updates";
-#else
-    auto dir = platf::appdata() / "updates";
-#endif
+    auto dir = updates_directory(ec);
+    if (ec) {
+      BOOST_LOG(warning) << "update: cannot locate the staging folder to clean it: "sv << ec.message();
+      return;
+    }
     // Anything here was either installed already (we are the new version) or abandoned. The
     // process that launched the installer is the one being replaced, so it cannot clean up after
     // itself; its successor does it here.
