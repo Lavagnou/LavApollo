@@ -34,6 +34,17 @@ TEST(UpdaterVersionTests, RejectsNonVersions) {
   EXPECT_FALSE(parse_semver("1.2.x").valid);
 }
 
+TEST(UpdaterVersionTests, RequiresExactlyThreeComponents) {
+  EXPECT_FALSE(parse_semver("1").valid);
+  EXPECT_FALSE(parse_semver("1.2").valid);
+  EXPECT_FALSE(parse_semver("1..2").valid);
+  EXPECT_FALSE(parse_semver("1.2.3.").valid);
+  EXPECT_FALSE(parse_semver(".1.2").valid);
+  EXPECT_FALSE(parse_semver("1.2.3.4").valid);
+  // Out of int range
+  EXPECT_FALSE(parse_semver("1.2.99999999999").valid);
+}
+
 TEST(UpdaterVersionTests, ComparesComponentByComponent) {
   EXPECT_TRUE(newer_than(parse_semver("1.1.6"), parse_semver("1.1.5")));
   EXPECT_TRUE(newer_than(parse_semver("1.2.0"), parse_semver("1.1.9")));

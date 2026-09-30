@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -89,32 +90,34 @@ namespace updater {
       if (auto pos = core.find('-'); pos != std::string::npos) core.erase(pos);  // drop prerelease
       if (auto pos = core.find('+'); pos != std::string::npos) core.erase(pos);  // drop build metadata
 
+      // Exactly major.minor.patch, each a non-empty run of digits that fits an int. Anything
+      // looser ("1", "1..2", "1.2.3.", "1.2.3.4") is not a version we know how to compare, and
+      // a malformed release tag must not read as an update.
       int parts[3] = {0, 0, 0};
-      int idx = 0;
-      bool any_digit = false;
-      std::string num;
-      auto flush = [&]() {
-        if (idx < 3 && !num.empty()) parts[idx++] = std::atoi(num.c_str());
-        num.clear();
-      };
-      for (char c : core) {
-        if (c == '.') {
-          flush();
+      std::string_view rest {core};
+      for (int i = 0; i < 3; ++i) {
+        auto dot = rest.find('.');
+        auto field = rest.substr(0, dot);
+        if (field.empty() || !std::all_of(field.begin(), field.end(), [](unsigned char c) { return std::isdigit(c); })) {
+          return v;
         }
-        else if (std::isdigit(static_cast<unsigned char>(c))) {
-          num += c;
-          any_digit = true;
+        auto [end, ec] = std::from_chars(field.data(), field.data() + field.size(), parts[i]);
+        if (ec != std::errc {} || end != field.data() + field.size()) {
+          return v;
         }
-        else {
-          return v;  // unexpected character → not a clean numeric version
+        if (i < 2) {
+          if (dot == std::string_view::npos) {
+            return v;
+          }
+          rest.remove_prefix(dot + 1);
+        } else if (dot != std::string_view::npos) {
+          return v;
         }
       }
-      flush();
       v.major = parts[0];
       v.minor = parts[1];
       v.patch = parts[2];
-      // An empty tag (a release object without tag_name) is not version 0.0.0.
-      v.valid = any_digit;
+      v.valid = true;
       return v;
     }
 
