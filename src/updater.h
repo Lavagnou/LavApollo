@@ -80,4 +80,12 @@ namespace updater {
 
   /// Reset the pipeline back to idle so a failed operation can be retried.
   void reset();
+
+  /**
+   * @brief Delete installers staged by earlier runs. Called once at startup.
+   *
+   * The process that launches the installer is the one the installer replaces, so it can never
+   * remove the file itself; the next process to start does.
+   */
+  void cleanup_staged_installers();
 }  // namespace updater

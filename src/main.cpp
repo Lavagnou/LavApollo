@@ -21,6 +21,7 @@
 #include "nvhttp.h"
 #include "process.h"
 #include "system_tray.h"
+#include "updater.h"
 #include "upnp.h"
 #include "uuid.h"
 #include "video.h"
@@ -411,6 +412,10 @@ int main(int argc, char *argv[]) {
 
     return -1;
   }
+
+  // An installer staged by the previous version has either run (we are its result) or been
+  // abandoned. Either way it has no business lingering next to the binary.
+  updater::cleanup_staged_installers();
 
   // Pre-flight: verify every streaming port can be bound before advertising the
   // host or starting the streaming servers. This catches reserved/excluded Windows
