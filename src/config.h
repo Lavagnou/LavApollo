@@ -6,6 +6,7 @@
 
 // standard includes
 #include <bitset>
+#include <cstdint>
 #include <chrono>
 #include <optional>
 #include <string>
@@ -308,12 +309,30 @@ namespace config {
     std::vector<server_cmd_t> server_cmds;
   };
 
+  /**
+   * @brief Stream-time frame cap applied to the game (ported from Vibepollo).
+   */
+  struct frame_limiter_t {
+    bool enable;
+    std::string provider;  ///< auto | rtss | nvidia-control-panel | none
+    std::uint32_t fps_limit_millihz;  ///< 0 caps at the stream's own frame rate
+    bool disable_vsync;  ///< Force the NVIDIA driver V-Sync off for the stream
+  };
+
+  struct rtss_t {
+    std::string install_path;  ///< Empty: %ProgramFiles%/RivaTuner Statistics Server
+    std::string frame_limit_type;  ///< RTSS SyncLimiter: async | front edge sync | back edge sync | nvidia reflex
+    bool allow_virtual_display_override;  ///< Let frame_limit_type replace the automatic Reflex choice on virtual displays
+  };
+
   extern video_t video;
   extern audio_t audio;
   extern stream_t stream;
   extern nvhttp_t nvhttp;
   extern input_t input;
   extern sunshine_t sunshine;
+  extern frame_limiter_t frame_limiter;
+  extern rtss_t rtss;
 
   int parse(int argc, char *argv[]);
   std::unordered_map<std::string, std::string> parse_config(const std::string_view &file_content);

@@ -26,7 +26,9 @@
 #include "video.h"
 
 #ifdef _WIN32
+  #include "platform/windows/frame_limiter_nvcp.h"
   #include "platform/windows/misc.h"
+  #include "platform/windows/rtss_integration.h"
   #include "platform/windows/virtual_display.h"
 #endif
 
@@ -220,6 +222,11 @@ int main(int argc, char *argv[]) {
     // Unload dynamic library to survive driver re-installation
     nvprefs_instance.unload();
   }
+
+  // Undo frame-limiter overrides a crashed or killed previous run left in the NVIDIA driver
+  // profile and in RTSS. After nvprefs, never alongside it: both open driver-settings sessions.
+  platf::frame_limiter_nvcp::restore_pending_overrides();
+  platf::rtss_restore_pending_overrides();
 
   // Wait as long as possible to terminate Sunshine.exe during logoff/shutdown
   SetProcessShutdownParameters(0x100, SHUTDOWN_NORETRY);

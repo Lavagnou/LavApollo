@@ -4,6 +4,7 @@
  */
 // standard includes
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -581,6 +582,19 @@ namespace config {
     true,  // native pen/touch support
     false, // enable input only mode
     true, // forward_rumble
+  };
+
+  frame_limiter_t frame_limiter {
+    false,  // enable
+    "auto",  // provider
+    0,  // fps_limit_millihz
+    false,  // disable_vsync
+  };
+
+  rtss_t rtss {
+    {},  // install_path
+    "async",  // frame_limit_type
+    false,  // allow_virtual_display_override
   };
 
   sunshine_t sunshine {
@@ -1256,6 +1270,17 @@ namespace config {
     bool_f(vars, "adaptive_bitrate", stream.adaptive_bitrate);
     int_between_f(vars, "pacing_multiplier", stream.pacing_multiplier, {0, 100});
     int_between_f(vars, "pyrowave_critical_fec_percentage", stream.pyrowave_critical_fec_percentage, {0, 255});
+
+    bool_f(vars, "frame_limiter_enable", frame_limiter.enable);
+    string_restricted_f(vars, "frame_limiter_provider", frame_limiter.provider, {"auto"sv, "rtss"sv, "nvidia-control-panel"sv, "none"sv});
+    double fps_limit = frame_limiter.fps_limit_millihz / 1000.0;
+    double_between_f(vars, "frame_limiter_fps_limit", fps_limit, {0.0, 1000.0});
+    frame_limiter.fps_limit_millihz = static_cast<std::uint32_t>(std::lround(fps_limit * 1000.0));
+    bool_f(vars, "frame_limiter_disable_vsync", frame_limiter.disable_vsync);
+    // Not path_f: that resolves relative paths against the config directory, an RTSS install is never there.
+    string_f(vars, "rtss_install_path", rtss.install_path);
+    string_restricted_f(vars, "rtss_frame_limit_type", rtss.frame_limit_type, {"async"sv, "front edge sync"sv, "back edge sync"sv, "nvidia reflex"sv});
+    bool_f(vars, "rtss_allow_virtual_display_override", rtss.allow_virtual_display_override);
 
     map_int_int_f(vars, "keybindings"s, input.keybindings);
 

@@ -6,6 +6,7 @@ import AdapterNameSelector from './audiovideo/AdapterNameSelector.vue'
 import DisplayOutputSelector from './audiovideo/DisplayOutputSelector.vue'
 import DisplayDeviceOptions from "./audiovideo/DisplayDeviceOptions.vue";
 import DisplayModesSettings from "./audiovideo/DisplayModesSettings.vue";
+import FrameLimiter from "./audiovideo/FrameLimiter.vue";
 import Checkbox from "../../Checkbox.vue";
 
 const $t = inject('i18n').t;
@@ -160,6 +161,9 @@ const validateFallbackMode = (event) => {
               default="false"
               v-if="platform === 'windows'"
     ></Checkbox>
+
+    <!-- Frame Limiter -->
+    <FrameLimiter :config="config" v-if="platform === 'windows'" />
 
     <!-- Isolated Virtual Display -->
     <Checkbox class="mb-3"

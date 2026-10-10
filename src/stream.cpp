@@ -34,6 +34,11 @@ extern "C" {
 #include "pyrowave_policy.h"
 #include "pyrowave_protocol.h"
 #include "stream.h"
+
+#ifdef _WIN32
+  #include "framegen_policy.h"
+  #include "platform/windows/frame_limiter.h"
+#endif
 #include "sync.h"
 #include "system_tray.h"
 #include "thread_safe.h"
@@ -2279,6 +2284,8 @@ namespace stream {
 
   namespace session {
     std::atomic_uint running_sessions;
+    // Sessions that stream video; input-only ones have no frame rate to cap.
+    std::atomic_uint frame_limiter_sessions;
 
     state_e state(session_t &session) {
       return session.state.load(std::memory_order_relaxed);
@@ -2402,6 +2409,12 @@ namespace stream {
         exec_thread.detach();
       }
 
+#ifdef _WIN32
+      if (!session.config.monitor.input_only && --frame_limiter_sessions == 0) {
+        platf::frame_limiter_streaming_stop(platf::frame_limiter_owner::rtsp);
+      }
+#endif
+
       // If this is the last session, invoke the platform callbacks
       if (--running_sessions == 0) {
         bool revert_display_config {config::video.dd.config_revert_on_disconnect};
@@ -2458,6 +2471,23 @@ namespace stream {
         platf::streaming_will_start();
         proc::proc.resume();
       }
+
+#ifdef _WIN32
+      // Cap the game at the stream's rate for as long as anyone is watching. The first video
+      // session decides; later ones share it, as they share the capture.
+      if (!session.config.monitor.input_only && ++frame_limiter_sessions == 1) {
+        const auto policy = framegen::make_stream_start_policy({
+          .fps = session.config.monitor.framerate,
+          .fps_scaled = session.config.monitor.encodingFramerate,
+          .uses_virtual_display = proc::proc.virtual_display,
+          .capture_mode = config::video.capture,
+          // Frame-generation policies come with the frame-gen fixes; until then the
+          // limiter only does what its own settings say.
+          .auto_virtual_framegen_limiter = false,
+        });
+        platf::frame_limiter_streaming_start(platf::frame_limiter_owner::rtsp, policy);
+      }
+#endif
 
       if (!session.do_cmds.empty()) {
         auto exec_thread = std::thread([cmd_list = session.do_cmds]{

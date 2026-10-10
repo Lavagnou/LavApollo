@@ -25,6 +25,7 @@
 // prevent clang format from "optimizing" the header include order
 // clang-format off
 #include <dwmapi.h>
+#include <dxgi.h>
 #include <iphlpapi.h>
 #include <iterator>
 #include <timeapi.h>
@@ -35,6 +36,7 @@
 #include <wlanapi.h>
 #include <WS2tcpip.h>
 #include <WtsApi32.h>
+#include <wrl/client.h>
 #include <sddl.h>
 // clang-format on
 
@@ -935,6 +937,90 @@ namespace platf {
 
     BOOST_LOG(info) << "Resolved user-provided command '"sv << raw_cmd << "' to '"sv << cmd_string << '\'';
     return cmd_string;
+  }
+
+  bool launch_process_with_impersonation(bool elevated, const std::string &cmd, const std::wstring &start_dir, DWORD creation_flags, STARTUPINFOEXW &startup_info, PROCESS_INFORMATION &process_info, std::error_code &ec) {
+    BOOL ret = FALSE;
+    if (is_running_as_system()) {
+      HANDLE user_token = retrieve_users_token(elevated);
+      if (!user_token) {
+        // Fail the launch rather than risking launching with Sunshine's permissions unmodified.
+        ec = std::make_error_code(std::errc::permission_denied);
+        return false;
+      }
+      auto token_close = util::fail_guard([user_token]() {
+        CloseHandle(user_token);
+      });
+
+      bp::environment cloned_env = boost::this_process::environment();
+      if (!merge_user_environment_block(cloned_env, user_token)) {
+        ec = std::make_error_code(std::errc::not_enough_memory);
+        return false;
+      }
+
+      ec = impersonate_current_user(user_token, [&]() {
+        std::wstring env_block = create_environment_block(cloned_env);
+        std::wstring wcmd = resolve_command_string(cmd, start_dir, user_token, creation_flags);
+        ret = CreateProcessAsUserW(user_token, nullptr, wcmd.data(), nullptr, nullptr, !!(startup_info.StartupInfo.dwFlags & STARTF_USESTDHANDLES), creation_flags, env_block.data(), start_dir.empty() ? nullptr : start_dir.c_str(), reinterpret_cast<LPSTARTUPINFOW>(&startup_info), &process_info);
+      });
+    } else {
+      // Not the service: the user already owns this process, so a child inherits the right session.
+      std::wstring wcmd = resolve_command_string(cmd, start_dir, nullptr, creation_flags);
+      ret = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, !!(startup_info.StartupInfo.dwFlags & STARTF_USESTDHANDLES), creation_flags, nullptr, start_dir.empty() ? nullptr : start_dir.c_str(), reinterpret_cast<LPSTARTUPINFOW>(&startup_info), &process_info);
+    }
+
+    if (!ret && !ec) {
+      BOOST_LOG(error) << "Failed to launch process: " << GetLastError();
+      ec = std::make_error_code(std::errc::invalid_argument);
+    }
+    return ret != FALSE;
+  }
+
+  namespace {
+    bool has_gpu_from_vendor(UINT vendor_id) {
+      Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+      if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+        return false;
+      }
+      Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+      for (UINT i = 0; SUCCEEDED(factory->EnumAdapters1(i, &adapter)); i++) {
+        DXGI_ADAPTER_DESC1 desc;
+        if (SUCCEEDED(adapter->GetDesc1(&desc)) && desc.VendorId == vendor_id) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }  // namespace
+
+  bool getFileVersionInfo(const std::filesystem::path &file_path, std::string &version_str) {
+    DWORD handle = 0;
+    const DWORD size = GetFileVersionInfoSizeW(file_path.wstring().c_str(), &handle);
+    if (size == 0) {
+      return false;
+    }
+
+    std::vector<BYTE> buffer(size);
+    if (!GetFileVersionInfoW(file_path.wstring().c_str(), handle, size, buffer.data())) {
+      return false;
+    }
+
+    VS_FIXEDFILEINFO *file_info = nullptr;
+    if (UINT file_info_size = 0; !VerQueryValueW(buffer.data(), L"\\", (LPVOID *) &file_info, &file_info_size) || !file_info) {
+      return false;
+    }
+
+    version_str = std::to_string(HIWORD(file_info->dwFileVersionMS)) + '.' + std::to_string(LOWORD(file_info->dwFileVersionMS)) + '.' +
+                  std::to_string(HIWORD(file_info->dwFileVersionLS)) + '.' + std::to_string(LOWORD(file_info->dwFileVersionLS));
+    return true;
+  }
+
+  bool has_nvidia_gpu() {
+    return has_gpu_from_vendor(0x10DE);
+  }
+
+  bool has_amd_gpu() {
+    return has_gpu_from_vendor(0x1002);
   }
 
   /**

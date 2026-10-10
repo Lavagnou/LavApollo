@@ -43,6 +43,7 @@
 #include "uuid.h"
 
 #ifdef _WIN32
+  #include "platform/windows/frame_limiter.h"
   #include "platform/windows/utils.h"
 #endif
 
@@ -1017,6 +1018,44 @@ namespace confighttp {
     send_response(response, output_tree);
   }
 
+#ifdef _WIN32
+  /**
+   * @brief Report what the frame limiter would use and what it is using right now.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/frame-limiter/status| GET| null}
+   */
+  void getFrameLimiterStatus(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    const auto status = platf::frame_limiter_get_status();
+    nlohmann::json output_tree;
+    output_tree["enabled"] = status.enabled;
+    output_tree["configured_provider"] = platf::frame_limiter_provider_to_string(status.configured_provider);
+    output_tree["active_provider"] = platf::frame_limiter_provider_to_string(status.active_provider);
+    output_tree["nvidia_available"] = status.nvidia_available;
+    output_tree["nvcp_ready"] = status.nvcp_ready;
+    output_tree["rtss_available"] = status.rtss_available;
+    output_tree["disable_vsync"] = status.disable_vsync;
+    output_tree["nv_overrides_supported"] = status.nv_overrides_supported;
+    output_tree["rtss"] = {
+      {"configured_path", status.rtss.configured_path},
+      {"resolved_path", status.rtss.resolved_path},
+      {"path_exists", status.rtss.path_exists},
+      {"hooks_found", status.rtss.hooks_found},
+      {"profile_found", status.rtss.profile_found},
+      {"can_bootstrap_profile", status.rtss.can_bootstrap_profile},
+      {"process_running", status.rtss.process_running},
+    };
+    send_response(response, output_tree);
+  }
+#endif
+
   /**
    * @brief Get the locale setting.
    * @param response The HTTP response object.
@@ -1733,6 +1772,9 @@ namespace confighttp {
     server.resource["^/api/apps/close$"]["POST"] = closeApp;
     server.resource["^/api/logs$"]["GET"] = getLogs;
     server.resource["^/api/logs/export$"]["GET"] = exportLogs;
+#ifdef _WIN32
+    server.resource["^/api/frame-limiter/status$"]["GET"] = getFrameLimiterStatus;
+#endif
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;

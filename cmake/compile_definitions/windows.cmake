@@ -64,6 +64,13 @@ set(PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/windows/virtual_display_recovery.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/virtual_display_recovery.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/virtual_display_recovery_policy.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/frame_limiter.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/frame_limiter.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/frame_limiter_nvcp.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/frame_limiter_nvcp.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/nvapi_driver_settings.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/rtss_integration.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/rtss_integration.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.cpp"
         "${CMAKE_SOURCE_DIR}/third-party/sudovda/sudovda-ioctl.h"
@@ -97,6 +104,7 @@ list(PREPEND PLATFORM_LIBRARIES
         shlwapi
         synchronization.lib
         userenv
+        version  # GetFileVersionInfoW (RTSS version check)
         ws2_32
         wsock32
         z  # log export (src/log_export.h); also pulled in by curl, listed so it does not depend on that

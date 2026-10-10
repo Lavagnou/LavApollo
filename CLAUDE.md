@@ -111,6 +111,31 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
 ⚠️ These tests had silently gone red upstream (19 undocumented options, 5 labels the UI asked for but
 `en.json` never defined) and were brought back to green before the Vibepollo ports; keep them green.
 
+- **Frame limiter** (`config.frame_limiter_*`, `rtss_*`; ported from Vibepollo:
+  `src/platform/windows/frame_limiter*.{h,cpp}`, `rtss_integration.{h,cpp}`, `src/framegen_policy.h`).
+  While a video session streams, the game is capped at the client's frame rate through **RTSS** (writes
+  RTSS's global profile, drives RTSSHooks, starts RTSS itself if needed) or the **NVIDIA driver**
+  (base-profile FRL/V-Sync/low-latency settings over NVAPI, loaded at run time -- no import library, so
+  MinGW is fine). `auto` tries RTSS, then NVIDIA. Applied in `stream.cpp` `start()` when the **first
+  non-input-only** session starts, removed in `join()` when the last one ends.
+  - ⚠️ **Every change is snapshotted to `%ProgramData%\LavApollo\{nvcp,rtss}_overrides.json` before it is
+    made**, and `main.cpp` replays those at startup: a crashed or killed host must not leave a user's
+    games capped or V-Sync forced off. Not `...\Sunshine` as upstream, so a Vibepollo install on the
+    same machine keeps its own snapshots.
+  - ⚠️ `nvprefs` and the NVIDIA limiter both edit the driver's **base profile**. They touch different
+    settings and are serialized by construction -- `streaming_will_start()` (nvprefs) runs right
+    before the limiter on the same thread, and at startup the limiter's restore runs after nvprefs.
+    Never move either onto another thread.
+  - `RTSSHooks64.dll` is loaded **into the host process** (SYSTEM, when running as the service) from
+    `rtss_install_path`. That path is admin-only configuration, the same trust level as a prep command.
+  - `launch_process_with_impersonation()` (`misc.cpp`) starts RTSS in the user's session; unlike
+    Vibepollo's, it falls back to a plain `CreateProcessW` when the host is not the service.
+  - LavApollo has no per-app/per-client runtime config overrides, so the original's
+    `has_runtime_config_override()` checks are `false`. The frame-generation fields of
+    `framegen::stream_start_policy_t` stay off (`auto_virtual_framegen_limiter = false`) until the
+    frame-gen fixes are ported; with them on, the limiter would rewrite `frame_limit_type` and enable
+    itself on every virtual-display session.
+
 - **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
   previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
   IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in

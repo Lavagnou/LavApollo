@@ -1719,6 +1719,167 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
 </table>
 
+### frame_limiter_enable
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            While a client streams, limit the game to the frame rate the client asked for. Frames the stream cannot send are never rendered, which keeps pacing even and saves GPU time. Restored when the stream ends, and on the next start if the host crashed.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            frame_limiter_enable = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### frame_limiter_provider
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            RTSS (RivaTuner Statistics Server) paces frames most evenly and works on every GPU, but must be installed. The NVIDIA driver limiter needs nothing extra but rounds to whole frame rates and paces less precisely.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            auto
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            frame_limiter_provider = auto
+            @endcode</td>
+    </tr>
+</table>
+
+### frame_limiter_fps_limit
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Cap at this frame rate instead of the client's (decimals allowed). 0 follows the client.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            frame_limiter_fps_limit = 0
+            @endcode</td>
+    </tr>
+</table>
+
+### frame_limiter_disable_vsync
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Turn V-Sync off in the NVIDIA driver for the duration of the stream, and restore it afterwards. The game's own V-Sync setting may still apply.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            frame_limiter_disable_vsync = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### rtss_install_path
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Leave empty for the default install location. LavApollo starts RTSS when a stream begins if it is not already running.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            ""
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            rtss_install_path = ""
+            @endcode</td>
+    </tr>
+</table>
+
+### rtss_frame_limit_type
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            How RTSS waits between frames. Async is the default; front edge sync favours smoothness, back edge sync favours latency, NVIDIA Reflex needs a game that supports it.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            async
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            rtss_frame_limit_type = async
+            @endcode</td>
+    </tr>
+</table>
+
+### rtss_allow_virtual_display_override
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            On virtual displays the limiter picks NVIDIA Reflex by itself when frame generation needs it. Enable to always use the mode above instead.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            rtss_allow_virtual_display_override = disabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### max_bitrate
 
 <table>
