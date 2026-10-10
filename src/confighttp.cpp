@@ -32,6 +32,7 @@
 #include "file_handler.h"
 #include "globals.h"
 #include "httpcommon.h"
+#include "log_export.h"
 #include "logging.h"
 #include "network.h"
 #include "nvhttp.h"
@@ -1156,6 +1157,67 @@ namespace confighttp {
   }
 
   /**
+   * @brief Download the current and previous logs plus the config file as a ZIP,
+   *        with user names, IP/MAC addresses and e-mail addresses masked.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/logs/export| GET| null}
+   */
+  void exportLogs(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+    try {
+      logging::log_flush();
+
+      // The previous run's log is what matters after a crash; logging::init() rotates it to ".backup".
+      const std::vector<std::filesystem::path> sources {
+        config::sunshine.log_file,
+        config::sunshine.log_file + ".backup",
+        config::sunshine.config_file,
+      };
+      constexpr std::uintmax_t max_file_bytes = 64 * 1024 * 1024;
+
+      log_export::sanitizer_t sanitizer;
+      std::vector<log_export::zip_entry_t> entries;
+      for (const auto &path : sources) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec)) {
+          continue;
+        }
+        const auto size = std::filesystem::file_size(path, ec);
+        const auto mtime = std::filesystem::last_write_time(path, ec);
+        if (ec || size > max_file_bytes) {
+          continue;
+        }
+        std::ifstream file(path, std::ios::binary);
+        // Bounded read: the active log keeps growing while we collect it.
+        std::string data(static_cast<std::size_t>(size), '\0');
+        file.read(data.data(), static_cast<std::streamsize>(data.size()));
+        data.resize(static_cast<std::size_t>(file.gcount()));
+        entries.push_back({path.filename().string(), sanitizer.sanitize(data), mtime});
+      }
+      if (entries.empty()) {
+        bad_request(response, request, "No log files are available");
+        return;
+      }
+
+      SimpleWeb::CaseInsensitiveMultimap headers;
+      headers.emplace("Content-Type", "application/zip");
+      headers.emplace("Content-Disposition", "attachment; filename=\"lavapollo_logs.zip\"");
+      headers.emplace("Cache-Control", "no-store");
+      headers.emplace("X-Frame-Options", "DENY");
+      headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
+      response->write(SimpleWeb::StatusCode::success_ok, log_export::build_zip(entries), headers);
+    } catch (const std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
    * @brief Update existing credentials.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -1670,6 +1732,7 @@ namespace confighttp {
     server.resource["^/api/apps/launch$"]["POST"] = launchApp;
     server.resource["^/api/apps/close$"]["POST"] = closeApp;
     server.resource["^/api/logs$"]["GET"] = getLogs;
+    server.resource["^/api/logs/export$"]["GET"] = exportLogs;
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;

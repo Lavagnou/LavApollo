@@ -96,6 +96,7 @@ list(PREPEND PLATFORM_LIBRARIES
         userenv
         ws2_32
         wsock32
+        z  # log export (src/log_export.h); also pulled in by curl, listed so it does not depend on that
 )
 
 if(SUNSHINE_ENABLE_TRAY)

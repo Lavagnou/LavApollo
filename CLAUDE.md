@@ -89,6 +89,13 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
 ⚠️ These tests had silently gone red upstream (19 undocumented options, 5 labels the UI asked for but
 `en.json` never defined) and were brought back to green before the Vibepollo ports; keep them green.
 
+- **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
+  previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
+  IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in
+  the bundle). `src/log_export.h`, ported from Vibepollo; the ZIP is written by hand over zlib, no archive
+  library. It does **not** recognise passwords or tokens: never add a file that holds credentials
+  (`credentials_file`, `file_state`, keys) to the bundle.
+
 ### PyroWave
 
 [PyroWave](https://github.com/Themaister/pyrowave) is an intra-only GPU wavelet codec (Vulkan compute,

@@ -605,6 +605,8 @@
     "force_close_success": "Application Closed Successfully!",
     "logs": "Logs",
     "logs_desc": "See the logs uploaded by LavApollo",
+    "logs_export": "Download anonymized logs",
+    "logs_export_desc": "ZIP of the current and previous logs and the config file, with user names, IP and MAC addresses and e-mail addresses masked",
     "logs_find": "Find...",
     "restart_apollo": "Restart LavApollo",
     "restart_apollo_desc": "If LavApollo isn't working properly, you can try restarting it. This will terminate any running sessions.",
