@@ -31,6 +31,8 @@ extern "C" {
 #include "network.h"
 #include "platform/common.h"
 #include "process.h"
+#include "pyrowave_policy.h"
+#include "pyrowave_protocol.h"
 #include "stream.h"
 #include "sync.h"
 #include "system_tray.h"
@@ -118,12 +120,19 @@ namespace stream {
     // zero padding, such as AV1 (Sunshine extension).
     boost::endian::little_uint16_at lastPayloadLen;
 
-    std::uint8_t unknown[2];
+    // PyroWave (docs/pyrowave-protocol.md): the number of leading packets that hold
+    // the sequence header and the coarsest wavelet level, 0 when unknown. Unused by
+    // the other codecs; clients that do not know it ignore these bytes.
+    boost::endian::little_uint16_at pyrowave_critical_packets;
   };
 
   static_assert(
     sizeof(video_short_frame_header_t) == 8,
     "Short frame header must be 8 bytes"
+  );
+  static_assert(
+    sizeof(video_short_frame_header_t) == pyrowave::protocol::FRAME_HEADER_BYTES,
+    "PyroWave record alignment assumes the 8-byte short frame header"
   );
 
   struct video_packet_raw_t {
@@ -136,6 +145,13 @@ namespace stream {
 
     NV_VIDEO_PACKET packet;
   };
+
+  // Each shard is packetSize + MAX_RTP_HEADER_SIZE bytes, of which video_packet_raw_t
+  // is header: the rest is video payload, and PyroWave aligns its records to exactly that.
+  static_assert(
+    sizeof(video_packet_raw_t) - MAX_RTP_HEADER_SIZE == pyrowave::protocol::SHARD_OVERHEAD_BYTES,
+    "PyroWave record alignment assumes 16 bytes of per-shard overhead"
+  );
 
   struct video_packet_enc_prefix_t {
     std::uint8_t iv[12];  // 12-byte IV is ideal for AES-GCM
@@ -1009,7 +1025,11 @@ namespace stream {
           session->video.lossy_report_streak = 0;
         }
 
-        if (config::stream.adaptive_fec) {
+        // PyroWave sessions keep their own parity on the critical packets and lose at
+        // most a blurred area for one frame, so neither controller applies to them.
+        const bool pyrowave_session = session->config.monitor.videoFormat == pyrowave::protocol::BITSTREAM_FORMAT;
+
+        if (config::stream.adaptive_fec && !pyrowave_session) {
           // Step the FEC percentage up quickly on loss and back down slowly on
           // clean intervals. On loss-free links this returns the FEC overhead
           // to the video bitrate; on lossy ones it absorbs drops before the
@@ -1036,7 +1056,7 @@ namespace stream {
           }
         }
 
-        if (config::stream.adaptive_bitrate &&
+        if (config::stream.adaptive_bitrate && !pyrowave_session &&
             session->video.negotiated_bitrate_kbps > 0 &&
             session->video.bitrate_events) {
           // Cut the encoder bitrate when raising FEC alone isn't enough: the
@@ -1479,6 +1499,17 @@ namespace stream {
 
     auto ratecontrol_next_frame_start = std::chrono::steady_clock::now();
 
+    logging::min_max_avg_periodic_logger<double> detail_fec_coverage_logger(debug, "PyroWave: detail packets protected", "%");
+
+    // PyroWave paces at the routed link speed, which is refreshed every two seconds
+    // rather than per frame: route lookup must not block the send path.
+    struct {
+      std::chrono::steady_clock::time_point last_check;
+      std::uint64_t link_bps = 0;
+      std::string link_alias;
+      std::uint64_t logged_link_bps = std::numeric_limits<std::uint64_t>::max();
+    } pyrowave_link;
+
     while (auto packet = packets->pop()) {
       if (shutdown_event->peek()) {
         break;
@@ -1489,15 +1520,22 @@ namespace stream {
       auto session = (session_t *) packet->channel_data;
       auto lowseq = session->video.lowseq;
 
+      // PyroWave frames are all intra-coded, so a lost frame costs one frame and never a
+      // recovery keyframe, and the client decodes a frame that lost only finer detail.
+      const bool pyrowave_session = session->config.monitor.videoFormat == pyrowave::protocol::BITSTREAM_FORMAT;
+
       // Frames discarded on queue overflow leave a gap in the frame sequence.
       // Request an IDR right away so the client recovers without having to
       // detect the gap and ask for reference frame invalidation itself.
+      // PyroWave frames reference nothing: the next frame is the recovery.
       auto dropped_packets = packets->dropped();
       if (dropped_packets != dropped_packets_seen) {
         BOOST_LOG(warning) << "Video packet queue overflowed, dropped "sv << (dropped_packets - dropped_packets_seen)
-                           << " encoded frames; requesting IDR"sv;
+                           << " encoded frames"sv << (pyrowave_session ? ""sv : "; requesting IDR"sv);
         dropped_packets_seen = dropped_packets;
-        session->video.idr_events->raise(true);
+        if (!pyrowave_session) {
+          session->video.idr_events->raise(true);
+        }
       }
 
       std::string_view payload {(char *) packet->data(), packet->data_size()};
@@ -1540,68 +1578,125 @@ namespace stream {
         frame_header.frame_processing_latency = 0;
       }
 
-      auto fecPercentage = config::stream.adaptive_fec ?
-                             std::clamp(session->video.dyn_fec_percentage.load(std::memory_order_relaxed), 1, 255) :
-                             config::stream.fec_percentage;
+      // PyroWave ignores fec_percentage and adaptive FEC: only its critical packets get
+      // parity, planned below (docs/pyrowave-protocol.md).
+      auto fecPercentage = pyrowave_session            ? 0 :
+                           config::stream.adaptive_fec ? std::clamp(session->video.dyn_fec_percentage.load(std::memory_order_relaxed), 1, 255) :
+                                                         config::stream.fec_percentage;
 
       // Insert space for packet headers
       auto blocksize = session->config.packetsize + MAX_RTP_HEADER_SIZE;
       auto payload_blocksize = blocksize - sizeof(video_packet_raw_t);
+
+      // The frame header precedes the frame in the first packet
+      const std::size_t total_shards = (sizeof(frame_header) + payload.size() + payload_blocksize - 1) / payload_blocksize;
+      const std::size_t critical_shards = pyrowave_session && packet->pyrowave_critical_bytes ?
+                                            std::min(total_shards, (sizeof(frame_header) + packet->pyrowave_critical_bytes + payload_blocksize - 1) / payload_blocksize) :
+                                            0;
+      frame_header.pyrowave_critical_packets = std::uint16_t(std::min<std::size_t>(critical_shards, std::numeric_limits<std::uint16_t>::max()));
+
       auto payload_new = concat_and_insert(sizeof(video_packet_raw_t), payload_blocksize, std::string_view {(char *) &frame_header, sizeof(frame_header)}, payload);
 
       payload = std::string_view {(char *) payload_new.data(), payload_new.size()};
 
       // There are 2 bits for FEC block count for a maximum of 4 FEC blocks
-      constexpr auto MAX_FEC_BLOCKS = 4;
-
-      // The max number of data shards per block is found by solving this system of equations for D:
-      // D = 255 - P
-      // P = D * F
-      // which results in the solution:
-      // D = 255 / (1 + F)
-      // multiplied by 100 since F is the percentage as an integer:
-      // D = (255 * 100) / (100 + F)
-      auto max_data_shards_per_fec_block = (DATA_SHARDS_MAX * 100) / (100 + fecPercentage);
-
-      // Compute the number of FEC blocks needed for this frame using the block size and max shards
-      auto max_data_per_fec_block = max_data_shards_per_fec_block * blocksize;
-      auto fec_blocks_needed = (payload.size() + (max_data_per_fec_block - 1)) / max_data_per_fec_block;
-
-      // If the number of FEC blocks needed exceeds the protocol limit, turn off FEC for this frame.
-      // For normal FEC percentages, this should only happen for enormous frames (over 800 packets at 20%).
-      if (fec_blocks_needed > MAX_FEC_BLOCKS) {
-        BOOST_LOG(warning) << "Skipping FEC for abnormally large encoded frame (needed "sv << fec_blocks_needed << " FEC blocks)"sv;
-        fecPercentage = 0;
-        fec_blocks_needed = MAX_FEC_BLOCKS;
-      }
+      constexpr auto MAX_FEC_BLOCKS = pyrowave::protocol::MAX_FEC_BLOCKS;
 
       std::array<std::string_view, MAX_FEC_BLOCKS> fec_blocks;
+      std::array<int, MAX_FEC_BLOCKS> fec_block_percentages {};
+      std::size_t fec_blocks_needed = 0;
+      // The client asks for minRequiredFecPackets; PyroWave's critical block always has at least 2.
+      const std::size_t min_parity_shards = pyrowave_session ?
+                                              std::max<std::size_t>(2, std::size_t(std::max(session->config.minRequiredFecPackets, 0))) :
+                                              std::size_t(std::max(session->config.minRequiredFecPackets, 0));
+      // Ethernet header/FCS/preamble/interpacket gap, IP header, UDP header, plus the
+      // optional encrypted-video prefix all occupy link time.
+      const auto wire_bytes = blocksize + 38 + (session->video.peer.address().is_v6() ? 40 : 20) + 8 +
+                              (session->video.cipher ? sizeof(video_packet_enc_prefix_t) : 0);
+
+      if (pyrowave_session) {
+        // Critical shards receive baseline parity. Stable pictures at low cadence may
+        // also protect detail, bounded by unused bitrate and FEC block capacity.
+        auto plan = pyrowave::policy::plan_fec_blocks(total_shards, critical_shards, config::stream.pyrowave_critical_fec_percentage, min_parity_shards);
+        if (packet->pyrowave_detail_fec_percentage > 0 && critical_shards) {
+          std::size_t baseline_packets = total_shards;
+          for (const auto &block : plan) {
+            baseline_packets += pyrowave::policy::parity_shards(block.data_shards, block.fec_percentage, min_parity_shards);
+          }
+          const auto packet_budget = packet->pyrowave_frame_wire_budget / wire_bytes;
+          if (packet_budget > baseline_packets) {
+            plan = pyrowave::policy::plan_fec_blocks(total_shards, critical_shards, config::stream.pyrowave_critical_fec_percentage, min_parity_shards, packet->pyrowave_detail_fec_percentage, packet_budget - baseline_packets);
+          }
+        }
+        std::size_t protected_shards = 0;
+        for (const auto &block : plan) {
+          if (block.fec_percentage > 0) {
+            protected_shards += block.data_shards;
+          }
+        }
+        detail_fec_coverage_logger.collect_and_log(total_shards > critical_shards && protected_shards >= critical_shards ? 100.0 * (protected_shards - critical_shards) / (total_shards - critical_shards) : 0.0);
+
+        std::size_t offset = 0;
+        for (const auto &block : plan) {
+          if (block.data_shards > pyrowave::policy::MAX_FEC_BLOCK_SHARDS) {
+            BOOST_LOG(error) << "PyroWave frame too large to send ("sv << total_shards << " packets)"sv;
+          }
+          const bool last = fec_blocks_needed + 1 == plan.size();
+          fec_blocks[fec_blocks_needed] = last ? payload.substr(offset) : payload.substr(offset, block.data_shards * blocksize);
+          fec_block_percentages[fec_blocks_needed] = block.fec_percentage;
+          offset += block.data_shards * blocksize;
+          ++fec_blocks_needed;
+        }
+      } else {
+        // The max number of data shards per block is found by solving this system of equations for D:
+        // D = 255 - P
+        // P = D * F
+        // which results in the solution:
+        // D = 255 / (1 + F)
+        // multiplied by 100 since F is the percentage as an integer:
+        // D = (255 * 100) / (100 + F)
+        auto max_data_shards_per_fec_block = (DATA_SHARDS_MAX * 100) / (100 + fecPercentage);
+
+        // Compute the number of FEC blocks needed for this frame using the block size and max shards
+        auto max_data_per_fec_block = max_data_shards_per_fec_block * blocksize;
+        fec_blocks_needed = (payload.size() + (max_data_per_fec_block - 1)) / max_data_per_fec_block;
+
+        // If the number of FEC blocks needed exceeds the protocol limit, turn off FEC for this frame.
+        // For normal FEC percentages, this should only happen for enormous frames (over 800 packets at 20%).
+        if (fec_blocks_needed > MAX_FEC_BLOCKS) {
+          BOOST_LOG(warning) << "Skipping FEC for abnormally large encoded frame (needed "sv << fec_blocks_needed << " FEC blocks)"sv;
+          fecPercentage = 0;
+          fec_blocks_needed = MAX_FEC_BLOCKS;
+        }
+
+        // Align individual FEC blocks to blocksize
+        auto unaligned_size = payload.size() / fec_blocks_needed;
+        auto aligned_size = ((unaligned_size + (blocksize - 1)) / blocksize) * blocksize;
+
+        // If we exceed the 10-bit FEC packet index (which means our frame exceeded 4096 packets),
+        // the frame will be unrecoverable. Log an error for this case.
+        if (aligned_size / blocksize >= 1024) {
+          BOOST_LOG(error) << "Encoder produced a frame too large to send! Is the encoder broken? (needed "sv << (aligned_size / blocksize) << " packets)"sv;
+        }
+
+        // Split the data into aligned FEC blocks
+        for (std::size_t x = 0; x < fec_blocks_needed; ++x) {
+          if (x == fec_blocks_needed - 1) {
+            // The last block must extend to the end of the payload
+            fec_blocks[x] = payload.substr(x * aligned_size);
+          } else {
+            // Earlier blocks just extend to the next block offset
+            fec_blocks[x] = payload.substr(x * aligned_size, aligned_size);
+          }
+          fec_block_percentages[x] = fecPercentage;
+        }
+      }
+
       decltype(fec_blocks)::iterator
         fec_blocks_begin = std::begin(fec_blocks),
         fec_blocks_end = std::begin(fec_blocks) + fec_blocks_needed;
 
       BOOST_LOG(verbose) << "Generating "sv << fec_blocks_needed << " FEC blocks"sv;
-
-      // Align individual FEC blocks to blocksize
-      auto unaligned_size = payload.size() / fec_blocks_needed;
-      auto aligned_size = ((unaligned_size + (blocksize - 1)) / blocksize) * blocksize;
-
-      // If we exceed the 10-bit FEC packet index (which means our frame exceeded 4096 packets),
-      // the frame will be unrecoverable. Log an error for this case.
-      if (aligned_size / blocksize >= 1024) {
-        BOOST_LOG(error) << "Encoder produced a frame too large to send! Is the encoder broken? (needed "sv << (aligned_size / blocksize) << " packets)"sv;
-      }
-
-      // Split the data into aligned FEC blocks
-      for (int x = 0; x < fec_blocks_needed; ++x) {
-        if (x == fec_blocks_needed - 1) {
-          // The last block must extend to the end of the payload
-          fec_blocks[x] = payload.substr(x * aligned_size);
-        } else {
-          // Earlier blocks just extend to the next block offset
-          fec_blocks[x] = payload.substr(x * aligned_size, aligned_size);
-        }
-      }
 
       try {
         // Use around 80% of 1Gbps          1Gbps            percent    ms     packet      byte
@@ -1625,6 +1720,39 @@ namespace stream {
           ratecontrol_packets_in_1ms = std::min(std::max(bitrate_packets_in_1ms, min_packets_in_1ms), ratecontrol_packets_in_1ms);
         }
 
+        if (pyrowave_session) {
+          // PyroWave frames run to hundreds of Mbps, above the 800 Mbps cap the other
+          // codecs keep: pace at the routed link speed when it is known (wired), else
+          // from the frame size and bitrate (pyrowave::policy::pacing_packets_per_ms).
+          // The pacing multiplier does not apply.
+          const auto now = std::chrono::steady_clock::now();
+          if (pyrowave_link.last_check == std::chrono::steady_clock::time_point {} || now - pyrowave_link.last_check >= 2s) {
+            pyrowave_link.last_check = now;
+            pyrowave_link.link_bps = 0;
+            pyrowave_link.link_alias = "unavailable";
+#ifdef _WIN32
+            platf::routed_link_info_t link_info;
+            pyrowave_link.link_bps = platf::routed_link_bps(session->localAddress, session->video.peer.address(), &link_info);
+            if (!link_info.alias.empty()) {
+              pyrowave_link.link_alias = link_info.alias + " (ifType " + std::to_string(link_info.if_type) +
+                                         ", transmit " + std::to_string(link_info.transmit_bps / 1'000'000) + " Mbps)";
+            }
+#endif
+          }
+          const auto &monitor = session->config.monitor;
+          ratecontrol_packets_in_1ms = pyrowave::policy::pacing_packets_per_ms(
+            pyrowave_link.link_bps, monitor.bitrate, payload_blocksize, wire_bytes,
+            packet->data_size() + sizeof(frame_header), monitor.framerate
+          );
+          if (pyrowave_link.logged_link_bps != pyrowave_link.link_bps) {
+            pyrowave_link.logged_link_bps = pyrowave_link.link_bps;
+            BOOST_LOG(info) << "PyroWave pacing: "sv << session->localAddress << " -> "sv << session->video.peer.address()
+                            << " via "sv << pyrowave_link.link_alias << ", routed_link_bps "sv << pyrowave_link.link_bps
+                            << (pyrowave_link.link_bps ? ""sv : " (fallback: frame/bitrate demand)"sv) << ", "sv
+                            << ratecontrol_packets_in_1ms << " packets/ms at "sv << wire_bytes << " wire bytes"sv;
+          }
+        }
+
         // Send less than 64K in a single batch.
         // On Windows, batches above 64K seem to bypass SO_SNDBUF regardless of its size,
         // appear in "Other I/O" and begin waiting for interrupts.
@@ -1640,6 +1768,13 @@ namespace stream {
 
         size_t ratecontrol_frame_packets_sent = 0;
         size_t ratecontrol_group_packets_sent = 0;
+
+        // PyroWave record framing: flag the shards that start with a record, where a
+        // client that lost a record header resumes parsing.
+        const auto record_starts = critical_shards ?
+                                     pyrowave::policy::record_start_shards({packet->data(), packet->data_size()}, payload_blocksize) :
+                                     std::vector<bool> {};
+        std::size_t block_first_shard = 0;
 
         auto blockIndex = 0;
         std::for_each(fec_blocks_begin, fec_blocks_end, [&](std::string_view &current_payload) {
@@ -1659,14 +1794,19 @@ namespace stream {
             if (x == 0) {
               inspect->packet.flags |= FLAG_SOF;
             }
+            if (block_first_shard + x < record_starts.size() && record_starts[block_first_shard + x]) {
+              // `reserved` is NV_VIDEO_PACKET::extraFlags in newer moonlight-common-c.
+              inspect->packet.reserved |= pyrowave::protocol::EXTRA_FLAG_RECORD_START;
+            }
             if (x == packets - 1) {
               inspect->packet.flags |= FLAG_EOF;
             }
           }
+          block_first_shard += packets;
 
           frame_fec_latency_logger.first_point_now();
           // If video encryption is enabled, we allocate space for the encryption header before each shard
-          auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets, session->video.cipher ? sizeof(video_packet_enc_prefix_t) : 0);
+          auto shards = fec::encode(current_payload, blocksize, fec_block_percentages[blockIndex], min_parity_shards, session->video.cipher ? sizeof(video_packet_enc_prefix_t) : 0);
           frame_fec_latency_logger.second_point_now_and_log();
 
           auto peer_address = session->video.peer.address();

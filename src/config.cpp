@@ -445,6 +445,7 @@ namespace config {
 
     0,  // hevc_mode
     0,  // av1_mode
+    true,  // pyrowave
 
     2,  // min_threads
     {
@@ -536,6 +537,7 @@ namespace config {
     true,  // adaptive_fec
     true,  // adaptive_bitrate
     4,  // pacing_multiplier
+    20,  // pyrowave_critical_fec_percentage
 
     ENCRYPTION_MODE_NEVER,  // lan_encryption_mode
     ENCRYPTION_MODE_OPPORTUNISTIC,  // wan_encryption_mode
@@ -1114,6 +1116,7 @@ namespace config {
     int_f(vars, "qp", video.qp);
     int_between_f(vars, "hevc_mode", video.hevc_mode, {0, 3});
     int_between_f(vars, "av1_mode", video.av1_mode, {0, 3});
+    bool_f(vars, "pyrowave", video.pyrowave);
     int_f(vars, "min_threads", video.min_threads);
     string_f(vars, "sw_preset", video.sw.sw_preset);
     if (!video.sw.sw_preset.empty()) {
@@ -1252,6 +1255,7 @@ namespace config {
     bool_f(vars, "adaptive_fec", stream.adaptive_fec);
     bool_f(vars, "adaptive_bitrate", stream.adaptive_bitrate);
     int_between_f(vars, "pacing_multiplier", stream.pacing_multiplier, {0, 100});
+    int_between_f(vars, "pyrowave_critical_fec_percentage", stream.pyrowave_critical_fec_percentage, {0, 255});
 
     map_int_int_f(vars, "keybindings"s, input.keybindings);
 

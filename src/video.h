@@ -7,6 +7,7 @@
 // local includes
 #include "input.h"
 #include "platform/common.h"
+#include "pyrowave_policy.h"
 #include "thread_safe.h"
 #include "video_colorspace.h"
 
@@ -36,7 +37,7 @@ namespace video {
        SDR encoding colorspace (encoderCscMode >> 1) : 0 - BT.601, 1 - BT.709, 2 - BT.2020 */
     int encoderCscMode;
 
-    int videoFormat;  // 0 - H.264, 1 - HEVC, 2 - AV1
+    int videoFormat;  // 0 - H.264, 1 - HEVC, 2 - AV1, 3 - PyroWave
 
     /* Encoding color depth (bit depth): 0 - 8-bit, 1 - 10-bit
        HDR encoding activates when color depth is higher than 8-bit and the display which is being captured is operating in HDR mode */
@@ -48,6 +49,11 @@ namespace video {
 
     int encodingFramerate; // Requested display framerate
     bool input_only;
+
+    // PyroWave only (videoFormat 3): the negotiated RTP packet size, which record
+    // framing aligns to, and the framing the client asked for (rtsp.cpp).
+    int packetsize = 0;
+    pyrowave::policy::framing_e pyrowave_framing = pyrowave::policy::framing_e::records;
   };
 
   platf::mem_type_e map_base_dev_type(AVHWDeviceType type);
@@ -271,6 +277,14 @@ namespace video {
     void *channel_data = nullptr;
     bool after_ref_frame_invalidation = false;
     std::optional<std::chrono::steady_clock::time_point> frame_timestamp;
+
+    /// PyroWave record framing: frame bytes through the coarsest wavelet level, whose
+    /// shards stream.cpp protects with parity. 0 for other codecs and framings.
+    std::size_t pyrowave_critical_bytes = 0;
+    /// Extra parity requested for the finer detail of a stable low-cadence picture,
+    /// and the wire budget that pays for it (pyrowave::policy::detail_fec_controller_t).
+    int pyrowave_detail_fec_percentage = 0;
+    std::size_t pyrowave_frame_wire_budget = 0;
   };
 
   struct packet_raw_avcodec: packet_raw_t {
@@ -347,6 +361,12 @@ namespace video {
 
   extern int active_hevc_mode;
   extern int active_av1_mode;
+  /**
+   * PyroWave encoding on the capture adapter: 0 - not probed, 1 - disabled or
+   * unsupported, 2 - available (advertised). PyroWave bypasses encoder_t, so this is
+   * independent of the probed hardware encoder (docs/pyrowave-protocol.md).
+   */
+  extern int active_pyrowave_mode;
   extern bool last_encoder_probe_supported_ref_frames_invalidation;
   extern std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec;  // 0 - H.264, 1 - HEVC, 2 - AV1
 

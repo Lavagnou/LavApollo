@@ -43,6 +43,13 @@ const config = ref(props.config)
       <div class="form-text">{{ $t('config.pacing_multiplier_desc') }}</div>
     </div>
 
+    <!-- PyroWave critical FEC -->
+    <div class="mb-3">
+      <label for="pyrowave_critical_fec_percentage" class="form-label">{{ $t('config.pyrowave_critical_fec_percentage') }}</label>
+      <input type="number" class="form-control" id="pyrowave_critical_fec_percentage" placeholder="20" min="0" max="255" v-model="config.pyrowave_critical_fec_percentage" />
+      <div class="form-text">{{ $t('config.pyrowave_critical_fec_percentage_desc') }}</div>
+    </div>
+
     <!-- Quantization Parameter -->
     <div class="mb-3">
       <label for="qp" class="form-label">{{ $t('config.qp') }}</label>
@@ -112,6 +119,14 @@ const config = ref(props.config)
       </select>
       <div class="form-text">{{ $t('config.av1_mode_desc') }}</div>
     </div>
+
+    <!-- PyroWave Support -->
+    <Checkbox class="mb-3"
+              id="pyrowave"
+              locale-prefix="config"
+              v-model="config.pyrowave"
+              default="true"
+    ></Checkbox>
 
     <!-- Capture -->
     <div class="mb-3" v-if="platform !== 'macos'">

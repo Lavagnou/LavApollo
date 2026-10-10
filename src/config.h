@@ -28,6 +28,7 @@ namespace config {
 
     int hevc_mode;
     int av1_mode;
+    bool pyrowave;  ///< Advertise PyroWave (bitStreamFormat 3) when the capture GPU can encode it.
 
     int min_threads;  // Minimum number of threads/slices for CPU encoding
 
@@ -181,6 +182,11 @@ namespace config {
     // Pace video sends at this multiple of the stream bitrate instead of
     // bursting each frame at near line rate. 0 disables bitrate-based pacing.
     int pacing_multiplier;
+
+    // Parity on the PyroWave shards holding the coarsest wavelet level (at least 2
+    // shards); 0 = none. PyroWave ignores fec_percentage, adaptive_fec and
+    // pacing_multiplier: its frames are independent (docs/pyrowave-protocol.md).
+    int pyrowave_critical_fec_percentage;
 
     // Video encryption settings for LAN and WAN streams
     int lan_encryption_mode;

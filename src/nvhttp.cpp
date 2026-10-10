@@ -34,6 +34,7 @@
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
+#include "pyrowave_protocol.h"
 #include "rtsp.h"
 #include "stream.h"
 #include "system_tray.h"
@@ -1128,9 +1129,24 @@ namespace nvhttp {
         codec_mode_flags |= SCM_AV1_HIGH10_444;
       }
     }
+    if (video::active_pyrowave_mode >= 2) {
+      codec_mode_flags |= pyrowave::protocol::SCM_MASK_PYROWAVE;
+    }
     tree.put("root.ServerCodecModeSupport", codec_mode_flags);
 
     tree.put("root.PairStatus", pair_status);
+
+    // PyroWave calibration hints for paired clients (docs/pyrowave-protocol.md). The
+    // link speed is the host's outbound physical link, not measured end-to-end
+    // throughput; unknown, wireless and virtual routes report zero.
+    if (pair_status && video::active_pyrowave_mode >= 2) {
+      std::uint64_t link_bps = 0;
+#ifdef _WIN32
+      link_bps = platf::routed_link_bps(local_endpoint.address(), request->remote_endpoint().address());
+#endif
+      tree.put("root.PyroWaveHostLinkMbps", link_bps / 1'000'000);
+      tree.put("root.PyroWaveBandwidthProbeBytes", pyrowave::protocol::BANDWIDTH_PROBE_BYTES);
+    }
 
     if constexpr (std::is_same_v<SunshineHTTPS, T>) {
       int current_appid = proc::proc.running();
@@ -1206,6 +1222,69 @@ namespace nvhttp {
     }
 
     return named_cert_nodes;
+  }
+
+  struct pyrowave_probe_state_t {
+    resp_https_t response;
+    std::size_t remaining;
+  };
+
+  void sendPyroWaveProbeChunk(const std::shared_ptr<pyrowave_probe_state_t> &state) {
+    static const std::string chunk(1024U * 1024U, '\x5a');
+    const auto bytes = std::min(state->remaining, chunk.size());
+    state->response->write(chunk.data(), static_cast<std::streamsize>(bytes));
+    state->remaining -= bytes;
+    if (state->remaining > 0) {
+      state->response->send([state](const auto &error) {
+        if (!error) {
+          sendPyroWaveProbeChunk(state);
+        }
+      });
+    }
+    // The response destructor sends the final buffered chunk.
+  }
+
+  /**
+   * @brief Fixed-size download a paired client times to calibrate its PyroWave bitrate.
+   *
+   * Runs over the normal pinned, mutually authenticated HTTPS connection, so only
+   * paired clients can use it, and at most 8 times a minute each.
+   */
+  void getPyroWaveBandwidthProbe(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+
+    const auto named_cert_p = get_verified_cert(request);
+    if (!named_cert_p || named_cert_p->uuid.empty() || video::active_pyrowave_mode < 2) {
+      response->write(SimpleWeb::StatusCode::client_error_forbidden, "Paired client and PyroWave required");
+      response->close_connection_after_response = true;
+      return;
+    }
+
+    static std::mutex quota_mutex;
+    static std::unordered_map<std::string, std::pair<std::chrono::steady_clock::time_point, unsigned>> quotas;
+    {
+      std::lock_guard lock {quota_mutex};
+      auto &quota = quotas[named_cert_p->uuid];
+      const auto now = std::chrono::steady_clock::now();
+      if (quota.first == std::chrono::steady_clock::time_point {} || now - quota.first >= 1min) {
+        quota = {now, 0};
+      }
+      if (quota.second >= 8) {
+        response->write(SimpleWeb::StatusCode::client_error_too_many_requests, "Probe rate limit reached");
+        response->close_connection_after_response = true;
+        return;
+      }
+      ++quota.second;
+    }
+
+    constexpr std::size_t probe_bytes = pyrowave::protocol::BANDWIDTH_PROBE_BYTES;
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", "application/octet-stream");
+    headers.emplace("Cache-Control", "no-store");
+    headers.emplace("Content-Length", std::to_string(probe_bytes));
+    response->write(SimpleWeb::StatusCode::success_ok, headers);
+    response->close_connection_after_response = true;
+    sendPyroWaveProbeChunk(std::make_shared<pyrowave_probe_state_t>(pyrowave_probe_state_t {response, probe_bytes}));
   }
 
   void applist(resp_https_t response, req_https_t request) {
@@ -1869,6 +1948,7 @@ namespace nvhttp {
     };
     https_server.resource["^/cancel$"]["GET"] = cancel;
     https_server.resource["^/actions/clipboard$"]["GET"] = getClipboard;
+    https_server.resource["^/pyrowave-bandwidth-probe$"]["GET"] = getPyroWaveBandwidthProbe;
     https_server.resource["^/actions/clipboard$"]["POST"] = setClipboard;
 
     https_server.config.reuse_address = true;

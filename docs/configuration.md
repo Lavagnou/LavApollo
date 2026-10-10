@@ -1904,6 +1904,36 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### pyrowave_critical_fec_percentage
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Parity on the PyroWave packets that hold the sequence header and the coarsest wavelet level
+            (a few percent of a frame), with at least 2 parity packets. Without them a frame cannot be
+            decoded; any other lost packet only blurs its area for one frame. 0 disables it.
+            @note{PyroWave ignores fec_percentage, adaptive_fec, adaptive_bitrate and pacing_multiplier.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            20
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">0-255</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            pyrowave_critical_fec_percentage = 20
+            @endcode</td>
+    </tr>
+</table>
+
 ### qp
 
 <table>
@@ -2035,6 +2065,34 @@ editing the `conf` file in a text editor. Use the examples as reference.
     <tr>
         <td>3</td>
         <td>advertise support for AV1 Main 8-bit and 10-bit (HDR) profiles</td>
+    </tr>
+</table>
+
+### pyrowave
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Allows the client to request PyroWave, an intra-only GPU wavelet codec
+            (see [pyrowave-protocol.md](pyrowave-protocol.md)). Encode and decode take well under a
+            millisecond and every frame is independent, so a lost packet never costs more than one frame.
+            It is advertised only when the capture GPU passes a Vulkan 1.3 probe, and clients must select
+            it explicitly.
+            @warning{A clean picture needs hundreds of Mbps. Use it on wired networks.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            pyrowave = disabled
+            @endcode</td>
     </tr>
 </table>
 
