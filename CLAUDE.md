@@ -77,11 +77,42 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
 - Send pacing derived from the negotiated stream bitrate rather than a hardcoded 800 Mbps.
 - Video queue drops the oldest frames on overflow instead of flushing.
 - Higher NVENC quality defaults (P4 preset, spatial AQ).
+- **PyroWave codec** (`config.pyrowave`, default on; `videoFormat`/`bitStreamFormat` 3) — see below.
 
 When touching these, keep the pairing of C++ option (`src/config.{h,cpp}`), web UI control
 (`src_assets/common/assets/web/configs/tabs/*.vue` + `config.html`), and locale string
 (`src_assets/common/assets/web/public/assets/locale/en.json`) in sync — `tests/integration/test_config_consistency.cpp`
 and `test_locale_consistency.cpp` enforce this and will fail otherwise.
+
+### PyroWave
+
+[PyroWave](https://github.com/Themaister/pyrowave) is an intra-only GPU wavelet codec (Vulkan compute,
+sub-millisecond encode, hundreds of Mbps). It is ported from [Vibepollo](https://github.com/Nonary/Vibepollo)
+(also an Apollo fork) and speaks its wire protocol unchanged, so Vibepollo-compatible clients work. The
+contract is `docs/pyrowave-protocol.md`, shared word for word with `LavArtemis-Qt/docs/` — change both.
+
+- **One PyroWave source.** `third-party/pyrowave` is the `Lavagnou/pyrowave` submodule (branch `lavartemis`,
+  upstream v1 + pruned Granite + build glue in `lavartemis/`). The bitstream has no version field, so
+  LavApollo and both LavArtemis clients must pin the **same commit**; bump them together.
+  `pyrowave::protocol::BITSTREAM_ID` (`src/pyrowave_protocol.h`) is advertised in DESCRIBE.
+- **It does not ride `encoder_t`.** `capture_async()` branches to `encode_run_pyrowave()` (`src/video.cpp`) for
+  `videoFormat == 3`, whatever encoder was probed; `capture()` always takes the async path for it. Every frame
+  is an IDR; IDR and RFI requests are drained and ignored. The encoder (`src/platform/windows/pyrowave_encode.cpp`
+  + `pyrowave_d3d11_core.cpp` + `convert_pyrowave_cs.hlsl`) opens the captured texture through its shared handle,
+  converts to Y'CbCr planes on a private D3D11 device and hands them to PyroWave's Vulkan device by NT handle +
+  shared fence. `img_d3d_t` moved to `display_vram.h` for this.
+- **Probing is separate** (`probe_pyrowave()`, `active_pyrowave_mode`): it is never gated on H.264 passing, but it
+  is refused when the chosen encoder captures to system memory — a PyroWave session shares that capture path.
+- **`stream.cpp`**: PyroWave ignores `fec_percentage`, `adaptive_fec`, `adaptive_bitrate` and `pacing_multiplier`.
+  Only the critical packets (sequence header + coarsest wavelet level) get parity, at
+  `pyrowave_critical_fec_percentage`, planned by `pyrowave::policy::plan_fec_blocks()`; their count rides the
+  last two bytes of the short frame header, and record-start shards set bit `0x80` of `NV_VIDEO_PACKET`'s
+  `reserved` byte (`extraFlags` in newer moonlight-common-c). Pacing follows the routed link speed
+  (`platf::routed_link_bps()`), refreshed every 2 s. A queue overflow requests no IDR.
+- **Calibration**: `/serverinfo` reports `PyroWaveHostLinkMbps` + `PyroWaveBandwidthProbeBytes` to paired clients,
+  and `/pyrowave-bandwidth-probe` serves a 32 MiB download (HTTPS, paired, 8/min) the client times.
+- `src/pyrowave_policy.{h,cpp}` (framing, FEC plan, budget, pacing) has no Sunshine dependency and is covered by
+  `tests/unit/test_pyrowave_policy.cpp`.
 
 ## Build
 
