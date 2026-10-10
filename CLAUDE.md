@@ -80,9 +80,14 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
 - **PyroWave codec** (`config.pyrowave`, default on; `videoFormat`/`bitStreamFormat` 3) — see below.
 
 When touching these, keep the pairing of C++ option (`src/config.{h,cpp}`), web UI control
-(`src_assets/common/assets/web/configs/tabs/*.vue` + `config.html`), and locale string
-(`src_assets/common/assets/web/public/assets/locale/en.json`) in sync — `tests/integration/test_config_consistency.cpp`
-and `test_locale_consistency.cpp` enforce this and will fail otherwise.
+(`src_assets/common/assets/web/configs/tabs/*.vue` + `config.html`), locale string
+(`src_assets/common/assets/web/public/assets/locale/en.json`) and `docs/configuration.md` entry in sync —
+`tests/integration/test_config_consistency.cpp` and `test_locale_consistency.cpp` enforce this and will fail
+otherwise. The docs entry must sit in the `##` section of the option's `config.html` tab, **in the same
+order as that tab's `options` object** (`ConfigOptionsInSameOrderWithinSections`); `config.html` only
+supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `config.html` freely.
+⚠️ These tests had silently gone red upstream (19 undocumented options, 5 labels the UI asked for but
+`en.json` never defined) and were brought back to green before the Vibepollo ports; keep them green.
 
 ### PyroWave
 

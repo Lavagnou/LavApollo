@@ -238,6 +238,55 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### global_state_cmd
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Configure a list of commands to be executed when resuming(first client connects when no clients are connected) or pausing(all clients disconnect) any application.
+Do commands for resume and Undo command for pause.
+Please make sure to clean up any side effects of the commands in the preparation undo commands.
+Please note that pause command will not be executed when the session terminates.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            []
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            global_state_cmd = []
+            @endcode</td>
+    </tr>
+</table>
+
+### server_cmd
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Configure a list of commands to be executed when called from client during streaming.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            []
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            server_cmd = []
+            @endcode</td>
+    </tr>
+</table>
+
 ### notify_pre_releases
 
 <table>
@@ -304,6 +353,75 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Example</td>
         <td colspan="2">@code{}
             system_tray = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### hide_tray_controls
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Do not show "Force Stop", "Restart" and "Quit" in tray menu.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            hide_tray_controls = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### enable_pairing
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Enable pairing for the Moonlight client. This allows the client to authenticate with the host and establish a secure connection.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            enable_pairing = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### enable_discovery
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            When disabled, you'll need to manually enter host IP on the client to pair.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            enable_discovery = enabled
             @endcode</td>
     </tr>
 </table>
@@ -711,6 +829,52 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### enable_input_only_mode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Add an Input Only app entry. When enabled, the app list will only show the current running app and the Input Only entry when streaming. The Input Only entry will not receive any image or audio. Useful for operating the desktop on TV or connecting peripherals which the TV doesn't support with a phone.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            enable_input_only_mode = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### forward_rumble
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Forward Rumble Messages to clients
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            forward_rumble = enabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### keybindings
 
 <table>
@@ -893,6 +1057,52 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Example</td>
         <td colspan="2">@code{}
             install_steam_audio_drivers = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### keep_sink_default
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Whether to force selected virtual sink as default (effective when host audio output is disabled).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            keep_sink_default = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### auto_capture_sink
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Auto capture current sink after default audio sink changed.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            auto_capture_sink = enabled
             @endcode</td>
     </tr>
 </table>
@@ -1084,6 +1294,29 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+
+### fallback_mode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            LavApollo will use this mode when the client does not provide a mode or when the app is launched through the web UI. Format: [Width]x[Height]x[FPS]
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            ""
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            fallback_mode = ""
+            @endcode</td>
+    </tr>
+</table>
 
 ### dd_configuration_option
 
@@ -1437,6 +1670,52 @@ editing the `conf` file in a text editor. Use the examples as reference.
               ]
             }@endcode
         </td>
+    </tr>
+</table>
+
+### headless_mode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Start LavApollo in headless mode. When enabled, all apps will start in virtual display.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            headless_mode = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### double_refreshrate
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Double the requested refresh rate when creating virtual displays, streamed refresh rate still remain the same. Can potentially improve stutter problem on some systems.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            double_refreshrate = disabled
+            @endcode</td>
     </tr>
 </table>
 
@@ -1904,6 +2183,75 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### adaptive_fec
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Automatically adjust the FEC percentage based on packet loss reported by the client: lower on clean networks to free bandwidth for video, higher during loss episodes to absorb drops. The configured FEC percentage is used as the starting point.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            adaptive_fec = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### adaptive_bitrate
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Temporarily lower the encoder bitrate when the client keeps reporting packet loss after FEC has been raised, then restore it once the network recovers. Requires an encoder with mid-stream reconfiguration support (NVENC).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            adaptive_bitrate = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### pacing_multiplier
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Spread each video frame's packets over time, sending at this multiple of the stream bitrate instead of bursting the whole frame at near line rate. Lower values smooth out bursts (helpful for Wi-Fi clients and shallow network buffers) at the cost of a few milliseconds of added send time. 0 disables pacing and restores legacy burst behavior.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            4
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            pacing_multiplier = 4
+            @endcode</td>
+    </tr>
+</table>
+
 ### pyrowave_critical_fec_percentage
 
 <table>
@@ -1980,6 +2328,98 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Example</td>
         <td colspan="2">@code{}
             min_threads = 2
+            @endcode</td>
+    </tr>
+</table>
+
+### limit_framerate
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Limit the framerate being captured to client requested framerate. May not run at full framerate if vsync is enabled and display refreshrate does not match requested framerate. Could cause lag on some clients if disabled.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            limit_framerate = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### envvar_compatibility_mode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Enable compatibility mode for environment variables. This will modify the behavior of certain environment variables to be more compatible with older tools.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            envvar_compatibility_mode = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### legacy_ordering
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Enable ordering support workaround for legacy clients. Can cause issues with clients or scripts that can't handle UTF8 correctly. Artemis clients support this by default.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            legacy_ordering = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### ignore_encoder_probe_failure
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Allow streaming to continue even if probing for encoders fails. This may result in streaming failure if no encoder is available.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            ignore_encoder_probe_failure = disabled
             @endcode</td>
     </tr>
 </table>
@@ -2457,6 +2897,29 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Example</td>
         <td colspan="2">@code{}
             nvenc_h264_cavlc = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### nvenc_intra_refresh
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Enable Intra Refresh for some clients to render correctly continuously (e.g. Xbox Client)
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            nvenc_intra_refresh = disabled
             @endcode</td>
     </tr>
 </table>
