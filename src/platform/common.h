@@ -745,6 +745,22 @@ namespace platf {
 
   bool send_batch(batched_send_info_t &send_info);
 
+  /// Interface resolved by routed_link_bps(), for diagnostics.
+  struct routed_link_info_t {
+    std::uint64_t luid = 0;
+    std::string alias;
+    unsigned long if_type = 0;
+    std::uint64_t transmit_bps = 0;
+  };
+
+  /**
+   * @brief Current transmit speed of the interface that routes `source` to `target`.
+   * @return Zero when unavailable, and for Wi-Fi and tunnel interfaces, whose link
+   *         rate is not a usable estimate of packet throughput. PyroWave paces its
+   *         sends with it and advertises it as PyroWaveHostLinkMbps. Windows only.
+   */
+  std::uint64_t routed_link_bps(const boost::asio::ip::address &source, const boost::asio::ip::address &target, routed_link_info_t *info = nullptr);
+
   struct send_info_t {
     const char *header;
     size_t header_size;

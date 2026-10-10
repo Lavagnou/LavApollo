@@ -116,6 +116,11 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/stat_trackers.cpp"
         "${CMAKE_SOURCE_DIR}/src/rswrapper.h"
         "${CMAKE_SOURCE_DIR}/src/rswrapper.c"
+        "${CMAKE_SOURCE_DIR}/src/pyrowave_host.cpp"
+        "${CMAKE_SOURCE_DIR}/src/pyrowave_host.h"
+        "${CMAKE_SOURCE_DIR}/src/pyrowave_policy.cpp"
+        "${CMAKE_SOURCE_DIR}/src/pyrowave_policy.h"
+        "${CMAKE_SOURCE_DIR}/src/pyrowave_protocol.h"
         ${PLATFORM_TARGET_FILES})
 
 if(NOT SUNSHINE_ASSETS_DIR_DEF)
