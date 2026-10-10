@@ -60,6 +60,12 @@ namespace VDISPLAY {
 	DRIVER_STATUS openVDisplayDevice();
 	bool startPingThread(std::function<void()> failCb);
 	bool setRenderAdapterByName(const std::wstring& adapterName);
+	bool setRenderAdapterWithMostDedicatedMemory();
+	/**
+	 * @brief Point the driver at the configured GPU, or at the one with the most dedicated
+	 *        memory when none is configured. Call before every createVirtualDisplay().
+	 */
+	bool applyRenderAdapterPreference(const std::wstring& adapterName);
 	std::wstring createVirtualDisplay(
 		const char* s_client_uid,
 		const char* s_client_name,

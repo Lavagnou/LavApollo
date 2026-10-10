@@ -368,16 +368,14 @@ int main(int argc, char *argv[]) {
 
       BOOST_LOG(info) << "Creating a temporary virtual display to probe for encoders..."sv;
 
-      if (!config::video.adapter_name.empty()) {
-        VDISPLAY::setRenderAdapterByName(platf::from_utf8(config::video.adapter_name));
-      }
+      VDISPLAY::applyRenderAdapterPreference(platf::from_utf8(config::video.adapter_name));
 
       VDISPLAY::createVirtualDisplay(
         probe_uuid_str.c_str(),
         "Probe",
         800,
         600,
-        60,
+        60000,  // millihertz, like every other caller
         *probe_guid
       );
 

@@ -74,6 +74,9 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
     `process.cpp:470` calls `reset_persistence()` for any virtual-display session, discarding the
     revert state -- harmless while the option is `disabled`, but it would strand a user's real
     displays turned off if they enabled it.
+- **Render adapter**: before every virtual display is created (`applyRenderAdapterPreference()`), the
+  driver is pointed at `adapter_name`, or at the GPU with the **most dedicated memory** when none is
+  set -- otherwise a hybrid laptop could render on the iGPU and encode on the dGPU.
 - Send pacing derived from the negotiated stream bitrate rather than a hardcoded 800 Mbps.
 - Video queue drops the oldest frames on overflow instead of flushing.
 - Higher NVENC quality defaults (P4 preset, spatial AQ).

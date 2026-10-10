@@ -249,10 +249,9 @@ namespace proc {
       }
 
       if (vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK) {
-        // Try set the render adapter matching the capture adapter if user has specified one
-        if (!config::video.adapter_name.empty()) {
-          VDISPLAY::setRenderAdapterByName(platf::from_utf8(config::video.adapter_name));
-        }
+        // Render on the capture adapter if the user picked one, else on the GPU with the most
+        // dedicated memory, so a hybrid laptop does not render on the iGPU and encode on the dGPU.
+        VDISPLAY::applyRenderAdapterPreference(platf::from_utf8(config::video.adapter_name));
 
         std::string device_name;
         std::string device_uuid_str;

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <optional>
 #include <vector>
 #include <setupapi.h>
 #include <initguid.h>
@@ -833,6 +834,46 @@ bool setRenderAdapterByName(const std::wstring& adapterName) {
 	}
 
 	return false;
+}
+
+bool setRenderAdapterWithMostDedicatedMemory() {
+	if (SUDOVDA_DRIVER_HANDLE == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+
+	Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+	if (!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+		return false;
+	}
+
+	// On a hybrid laptop the driver may otherwise render on the integrated GPU, so every
+	// frame crosses to the discrete one that encodes it. Software adapters (WARP) report
+	// no dedicated memory and lose naturally.
+	Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+	std::optional<DXGI_ADAPTER_DESC1> best;
+	for (UINT i = 0; SUCCEEDED(factory->EnumAdapters1(i, &adapter)); i++) {
+		DXGI_ADAPTER_DESC1 desc;
+		if (!SUCCEEDED(adapter->GetDesc1(&desc)) || (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
+			continue;
+		}
+		if (!best || desc.DedicatedVideoMemory > best->DedicatedVideoMemory) {
+			best = desc;
+		}
+	}
+
+	if (!best || !SetRenderAdapter(SUDOVDA_DRIVER_HANDLE, best->AdapterLuid)) {
+		return false;
+	}
+
+	BOOST_LOG(debug) << "SUDOVDA: rendering virtual displays on " << platf::to_utf8(best->Description);
+	return true;
+}
+
+bool applyRenderAdapterPreference(const std::wstring& adapterName) {
+	if (!adapterName.empty()) {
+		return setRenderAdapterByName(adapterName);
+	}
+	return setRenderAdapterWithMostDedicatedMemory();
 }
 
 std::wstring createVirtualDisplay(
