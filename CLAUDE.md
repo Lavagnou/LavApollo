@@ -132,9 +132,21 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
     Vibepollo's, it falls back to a plain `CreateProcessW` when the host is not the service.
   - LavApollo has no per-app/per-client runtime config overrides, so the original's
     `has_runtime_config_override()` checks are `false`. The frame-generation fields of
-    `framegen::stream_start_policy_t` stay off (`auto_virtual_framegen_limiter = false`) until the
-    frame-gen fixes are ported; with them on, the limiter would rewrite `frame_limit_type` and enable
-    itself on every virtual-display session.
+    `framegen::stream_start_policy_t` are only switched on for an app with frame generation (below);
+    with them on, the limiter enables itself and picks the RTSS `frame_limit_type`, so they must
+    never be on for ordinary sessions.
+- **Frame generation, per app** (`"frame-generation"` in `apps.json`: `off` | `game-provided` |
+  `nvidia-smooth-motion` | `lossless-scaling`; after Vibepollo). A frame-generated game presents more
+  often than it renders, and Desktop Duplication drops the in-between frames. When set:
+  - the app's virtual displays are created at **4x** the stream rate (`process.cpp`; `double_refreshrate`
+    stays the lighter 2x global option), retried at the stream rate if the driver refuses that refresh;
+  - a **single** virtual display is captured with **WGC** when `capture` is automatic, switched back in
+    `terminate()` (`_capture_before_framegen`). A layout keeps the Desktop Duplication composite;
+  - the frame limiter starts with the frame-generation policy: RTSS uses NVIDIA Reflex for DLSS/FSR on
+    an NVIDIA GPU, front edge sync otherwise, and **Smooth Motion** is enabled in the driver for the
+    stream when that is the provider.
+  - Lossless Scaling itself is **not** started or configured by the host (Vibepollo's 2k-line
+    automation lives in its Playnite launcher); the setting only prepares capture and pacing for it.
 
 - **WGC capture from the service** (ported from Vibepollo). Windows.Graphics.Capture needs an
   interactive desktop, which the SYSTEM service in session 0 does not have, so `capture = wgc` used to

@@ -403,6 +403,17 @@
                   v-model="editForm['per-client-app-identity']"
                   default="false"
         ></Checkbox>
+        <!-- frame generation -->
+        <div class="mb-3" v-if="platform === 'windows'">
+          <label for="frameGeneration" class="form-label">{{ $t('apps.frame_generation') }}</label>
+          <select id="frameGeneration" class="form-select" v-model="editForm['frame-generation']">
+            <option value="off">{{ $t('apps.frame_generation_off') }}</option>
+            <option value="game-provided">{{ $t('apps.frame_generation_game') }}</option>
+            <option value="nvidia-smooth-motion">NVIDIA Smooth Motion</option>
+            <option value="lossless-scaling">Lossless Scaling</option>
+          </select>
+          <div class="form-text">{{ $t('apps.frame_generation_desc') }}</div>
+        </div>
         <!-- resolution scale factor -->
         <div class="mb-3" v-if="platform === 'windows'">
           <label for="resolutionScaleFactor" class="form-label">{{ $t('apps.resolution_scale_factor') }}: {{editForm['scale-factor']}}%</label>
@@ -548,7 +559,8 @@
     "allow-client-commands": true,
     "virtual-display": false,
     "terminate-on-pause": false,
-    "gamepad": ""
+    "gamepad": "",
+    "frame-generation": "off"
   }
 
   const app = createApp({

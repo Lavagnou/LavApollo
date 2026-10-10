@@ -2476,14 +2476,20 @@ namespace stream {
       // Cap the game at the stream's rate for as long as anyone is watching. The first video
       // session decides; later ones share it, as they share the capture.
       if (!session.config.monitor.input_only && ++frame_limiter_sessions == 1) {
+        // A frame-generated app turns the limiter on with the frame-generation policy: the
+        // RTSS sync mode is picked for the provider (Reflex for DLSS/FSR on NVIDIA, front
+        // edge otherwise) and Smooth Motion is switched on in the driver when asked for.
+        const auto frame_generation = proc::proc.frame_generation;
+        const bool framegen_active = frame_generation != "off";
         const auto policy = framegen::make_stream_start_policy({
           .fps = session.config.monitor.framerate,
           .fps_scaled = session.config.monitor.encodingFramerate,
+          .frame_generation_enabled = framegen_active,
+          .lossless_scaling_framegen = frame_generation == "lossless-scaling",
+          .frame_generation_provider = framegen_active ? frame_generation : std::string {"lossless-scaling"},
           .uses_virtual_display = proc::proc.virtual_display,
           .capture_mode = config::video.capture,
-          // Frame-generation policies come with the frame-gen fixes; until then the
-          // limiter only does what its own settings say.
-          .auto_virtual_framegen_limiter = false,
+          .auto_virtual_framegen_limiter = framegen_active,
         });
         platf::frame_limiter_streaming_start(platf::frame_limiter_owner::rtsp, policy);
       }

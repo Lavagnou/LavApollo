@@ -231,3 +231,13 @@ namespace {
   }
 
 }  // namespace
+
+TEST(FramegenPolicy, PerAppModeOffOrProvider) {
+  // LavApollo's per-app "frame-generation" setting
+  EXPECT_EQ(framegen::normalize_frame_generation_mode(""), "off");
+  EXPECT_EQ(framegen::normalize_frame_generation_mode("Off"), "off");
+  EXPECT_EQ(framegen::normalize_frame_generation_mode("none"), "off");
+  EXPECT_EQ(framegen::normalize_frame_generation_mode("game-provided"), "game-provided");
+  EXPECT_EQ(framegen::normalize_frame_generation_mode("NVIDIA Smooth Motion"), "nvidia-smooth-motion");
+  EXPECT_EQ(framegen::normalize_frame_generation_mode("lossless-scaling"), "lossless-scaling");
+}

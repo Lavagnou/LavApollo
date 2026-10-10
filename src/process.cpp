@@ -32,6 +32,7 @@
 #include "crypto.h"
 #include "display_device.h"
 #include "file_handler.h"
+#include "framegen_policy.h"
 #include "logging.h"
 #include "platform/common.h"
 #include "process.h"
@@ -208,6 +209,7 @@ namespace proc {
     _app_name = app.name;
     _launch_session = launch_session;
     allow_client_commands = app.allow_client_commands;
+    frame_generation = app.frame_generation;
 
     uint32_t client_width = launch_session->width ? launch_session->width : 1920;
     uint32_t client_height = launch_session->height ? launch_session->height : 1080;
@@ -322,9 +324,12 @@ namespace proc {
           target_fps *= 1000;
         }
 
-        if (config::video.double_refreshrate) {
-          target_fps *= 2;
-        }
+        // A frame-generated game presents more often than it renders; a virtual display
+        // refreshing at 4x the stream rate gives every generated frame its own scan-out to be
+        // captured on (after Vibepollo). Double refresh stays the lighter global option.
+        const int base_fps = target_fps;
+        const int refresh_multiplier = _app.frame_generation != "off" ? 4 : (config::video.double_refreshrate ? 2 : 1);
+        target_fps = (int) framegen::saturating_refresh_millihz((std::uint32_t) target_fps, refresh_multiplier);
 
         // No matter we get the display name or not, the virtual display might still be created.
         // We need to track it properly to remove the display when the session terminates.
@@ -430,7 +435,19 @@ namespace proc {
 
         bool multi_display = displays.size() > 1;
 
-        if (!create_displays() && multi_display) {
+        bool displays_created = create_displays();
+        if (!displays_created && target_fps != base_fps) {
+          // The driver may refuse a refresh that high; a display at the stream rate is still
+          // far better than none.
+          BOOST_LOG(warning) << "Virtual display refused " << target_fps / 1000.0 << "Hz; retrying at the stream rate"sv;
+          for (const auto &display : displays) {
+            VDISPLAY::removeVirtualDisplay(display.guid);
+          }
+          target_fps = base_fps;
+          displays_created = create_displays();
+        }
+
+        if (!displays_created && multi_display) {
           // A layout missing a display is the worst possible outcome: capture would fall
           // back to whichever single display did come up, and the client would letterbox
           // that one into a canvas sized for the whole arrangement -- a strip of picture
@@ -508,6 +525,15 @@ namespace proc {
           // empty name when probing graphics cards.
 
           config::video.output_name = display_device::map_display_name(platf::to_utf8(created->device_name));
+
+          // Desktop Duplication misses frames a game generates between its own presents; WGC on
+          // a high-refresh virtual display sees each one. Only when the user left the capture
+          // method on automatic, and never for a layout, which only Desktop Duplication composes.
+          if (_app.frame_generation != "off" && !multi_display && config::video.capture.empty()) {
+            _capture_before_framegen = config::video.capture;
+            config::video.capture = "wgc";
+            BOOST_LOG(info) << "Frame generation: capturing with WGC for this app"sv;
+          }
 
           // Bring the displays back if they vanish under the stream: the driver's watchdog
           // fires, the driver restarts, or someone disables the monitor. Without this the
@@ -1034,6 +1060,11 @@ namespace proc {
     _launch_session.reset();
     virtual_display = false;
     allow_client_commands = false;
+    frame_generation = "off";
+    if (_capture_before_framegen) {
+      config::video.capture = *_capture_before_framegen;
+      _capture_before_framegen.reset();
+    }
 
     if (_saved_input_config) {
       config::input = *_saved_input_config;
@@ -1592,6 +1623,7 @@ namespace proc {
           ctx.allow_client_commands = app_node.value("allow-client-commands", true);
           ctx.terminate_on_pause = app_node.value("terminate-on-pause", false);
           ctx.gamepad = app_node.value("gamepad", "");
+          ctx.frame_generation = framegen::normalize_frame_generation_mode(app_node.value("frame-generation", "off"));
 
           // Calculate a unique application id.
           auto possible_ids = calculate_app_id(name, ctx.image_path, i++);

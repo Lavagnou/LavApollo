@@ -88,6 +88,8 @@ namespace proc {
     std::string image_path;
     std::string id;
     std::string gamepad;
+    /// "off", or who generates frames: "game-provided" (DLSS/FSR), "nvidia-smooth-motion", "lossless-scaling"
+    std::string frame_generation {"off"};
     bool elevated;
     bool auto_detach;
     bool wait_all;
@@ -119,6 +121,8 @@ namespace proc {
     bool initial_hdr = false;
     bool virtual_display = false;
     bool allow_client_commands = false;
+    /// The running app's frame-generation provider, "off" when none (read by the stream start).
+    std::string frame_generation {"off"};
 
     proc_t(
       boost::process::v1::environment &&env,
@@ -151,6 +155,8 @@ namespace proc {
 
   private:
     std::string _display_name;
+    /// config::video.capture before a frame-generated app switched it to WGC, to restore on terminate
+    std::optional<std::string> _capture_before_framegen;
 
     int _app_id = 0;
     std::string _app_name;

@@ -77,6 +77,22 @@ namespace framegen {
     return "lossless-scaling";
   }
 
+  /**
+   * @brief Per-app frame generation setting (LavApollo): "off", or the normalized provider.
+   */
+  inline std::string normalize_frame_generation_mode(std::string_view value) {
+    std::string normalized;
+    for (char ch : value) {
+      if (std::isalnum(static_cast<unsigned char>(ch))) {
+        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+      }
+    }
+    if (normalized.empty() || normalized == "off" || normalized == "none" || normalized == "disabled") {
+      return "off";
+    }
+    return normalize_provider(value);
+  }
+
   inline bool virtual_display_reflex_required(
     const stream_start_policy_t &policy,
     bool allow_virtual_display_override,
