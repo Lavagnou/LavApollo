@@ -48,6 +48,8 @@ namespace mail {
   MAIL(video_packets);
   MAIL(audio_packets);
   MAIL(switch_display);
+  // Reopen proc::proc's display, e.g. after the virtual-display recovery monitor re-created it
+  MAIL(recapture_display);
 
   // Local mail
   MAIL(touch_port);

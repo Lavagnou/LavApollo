@@ -74,6 +74,25 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
     `process.cpp:470` calls `reset_persistence()` for any virtual-display session, discarding the
     revert state -- harmless while the option is `disabled`, but it would strand a user's real
     displays turned off if they enabled it.
+- **Virtual-display recovery** (`src/platform/windows/virtual_display_recovery.{h,cpp}`, timings in
+  `virtual_display_recovery_policy.h`, after Vibepollo's monitor). A SudoVDA display can vanish under a
+  running stream (watchdog fired, driver restarted, monitor disabled); capture then silently falls back
+  to the physical display. One monitor thread per session polls every display with
+  `isDisplayAttached()`, and after a 500 ms grace re-creates the missing ones with the **same GUID,
+  serial, label and mode**, re-applies the layout, publishes the new names through
+  `proc_t::set_display_name()` and raises `mail::recapture_display` so the capture thread reopens them.
+  3 attempts per cycle (successes count too, so a display that keeps vanishing is not re-created in a
+  loop), then 5 s→60 s backoff, giving up after 5 cycles. Leaner than Vibepollo's 9k-line version:
+  no display helper, no topology database, no orphan sweep at startup -- displays of a dead host
+  already go away through SudoVDA's own watchdog once its pings stop.
+  - ⚠️ `VDISPLAY::recovery::stop()` **must run before any deliberate `removeVirtualDisplay()`**
+    (`proc_t::terminate()` does it first), or the monitor puts the display straight back.
+  - ⚠️ **`proc_t::display_name` is behind a lock now** (`get_display_name()` / `set_display_name()`):
+    `execute()`, the capture thread's fallback and the recovery monitor all write it, the capture
+    thread reads it on every reinit. The capture reinit reads it **once per attempt**, so a rename by
+    the monitor during the retries is picked up on the next one.
+  - Only the async capture path (encoders with `PARALLEL_ENCODING`: NVENC, AMF, QSV) honours
+    `recapture_display`; the sync path never consulted `proc.display_name` in the first place.
 - **Render adapter**: before every virtual display is created (`applyRenderAdapterPreference()`), the
   driver is pointed at `adapter_name`, or at the GPU with the **most dedicated memory** when none is
   set -- otherwise a hybrid laptop could render on the iGPU and encode on the dGPU.

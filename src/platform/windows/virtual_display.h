@@ -66,6 +66,10 @@ namespace VDISPLAY {
 	 *        memory when none is configured. Call before every createVirtualDisplay().
 	 */
 	bool applyRenderAdapterPreference(const std::wstring& adapterName);
+	/**
+	 * @brief Whether a display with this GDI device name is currently part of the desktop.
+	 */
+	bool isDisplayAttached(const std::wstring& deviceName);
 	std::wstring createVirtualDisplay(
 		const char* s_client_uid,
 		const char* s_client_name,

@@ -876,6 +876,18 @@ bool applyRenderAdapterPreference(const std::wstring& adapterName) {
 	return setRenderAdapterWithMostDedicatedMemory();
 }
 
+bool isDisplayAttached(const std::wstring& deviceName) {
+	DISPLAY_DEVICEW device{};
+	device.cb = sizeof(device);
+	for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &device, 0); i++) {
+		if ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) && deviceName == device.DeviceName) {
+			return true;
+		}
+		device.cb = sizeof(device);
+	}
+	return false;
+}
+
 std::wstring createVirtualDisplay(
 	const char* s_client_uid,
 	const char* s_client_name,

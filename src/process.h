@@ -32,6 +32,7 @@
 
 #ifdef _WIN32
   #include "platform/windows/virtual_display.h"
+  #include "platform/windows/virtual_display_recovery.h"
 #endif
 
 #define VIRTUAL_DISPLAY_UUID "8902CB19-674A-403D-A587-41B092E900BA"
@@ -104,7 +105,15 @@ namespace proc {
   public:
     KITTY_DEFAULT_CONSTR_MOVE_THROW(proc_t)
 
-    std::string display_name;
+    /**
+     * @brief The display (or `+`-joined displays) the capture thread should open.
+     *
+     * Written by execute(), by the capture thread when it falls back to another display,
+     * and by the virtual-display recovery monitor when it re-creates a lost display; read
+     * by the capture thread on every reinit. Hence the lock: never touch the field directly.
+     */
+    std::string get_display_name() const;
+    void set_display_name(std::string name);
     std::string initial_display;
     std::string mode_changed_display;
     bool initial_hdr = false;
@@ -141,6 +150,8 @@ namespace proc {
     void terminate(bool immediate = false, bool needs_refresh = true);
 
   private:
+    std::string _display_name;
+
     int _app_id = 0;
     std::string _app_name;
 

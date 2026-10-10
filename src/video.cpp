@@ -1099,7 +1099,7 @@ namespace video {
    * @param display_names The list of display names to repopulate.
    * @param current_display_index The current display index or -1 if not yet known.
    */
-  void refresh_displays(platf::mem_type_e dev_type, std::vector<std::string> &display_names, int &current_display_index, std::string &preferred_display_name) {
+  void refresh_displays(platf::mem_type_e dev_type, std::vector<std::string> &display_names, int &current_display_index, const std::string &preferred_display_name) {
     // It is possible that the output name may be empty even if it wasn't before (device disconnected) or vice-versa
     const auto output_name { display_device::map_output_name(config::video.output_name) };
     std::string current_display_name = preferred_display_name;
@@ -1176,6 +1176,7 @@ namespace video {
     });
 
     auto switch_display_event = mail::man->event<int>(mail::switch_display);
+    auto recapture_display_event = mail::man->event<bool>(mail::recapture_display);
 
     // Wait for the initial capture context or a request to stop the queue
     auto initial_capture_ctx = capture_ctx_queue->pop();
@@ -1187,15 +1188,16 @@ namespace video {
     std::vector<std::string> display_names;
     int display_p = -1;
     std::shared_ptr<platf::display_t> disp;
-    if (!proc::proc.display_name.empty()) {
-      disp = platf::display(encoder.platform_formats->dev_type, proc::proc.display_name, capture_ctxs.front().config);
+    const auto initial_display = proc::proc.get_display_name();
+    if (!initial_display.empty()) {
+      disp = platf::display(encoder.platform_formats->dev_type, initial_display, capture_ctxs.front().config);
     }
     if (!disp) {
       // Falling back here silently is how a broken multi-display capture ends up looking
       // like a picture on the wrong monitor rather than like an error: we quietly capture
       // some single display instead of the arrangement that was asked for.
-      if (!proc::proc.display_name.empty()) {
-        BOOST_LOG(warning) << "Could not capture ["sv << proc::proc.display_name
+      if (!initial_display.empty()) {
+        BOOST_LOG(warning) << "Could not capture ["sv << initial_display
                            << "], falling back to a single display"sv;
       }
 
@@ -1204,7 +1206,7 @@ namespace video {
       refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);
       disp = platf::display(encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
       if (disp) {
-        proc::proc.display_name = display_names[display_p];
+        proc::proc.set_display_name(display_names[display_p]);
       } else {
         return;
       }
@@ -1338,7 +1340,7 @@ namespace video {
           capture_ctxs.emplace_back(std::move(*capture_ctx_queue->pop()));
         }
 
-        if (switch_display_event->peek()) {
+        if (switch_display_event->peek() || recapture_display_event->peek()) {
           artificial_reinit = true;
           return false;
         }
@@ -1388,6 +1390,12 @@ namespace video {
               std::this_thread::sleep_for(20ms);
             }
 
+            // Consumed here rather than when raised: the reopen below reads proc's display
+            // name afresh, which is all a recapture request asks for.
+            while (recapture_display_event->peek()) {
+              recapture_display_event->pop();
+            }
+
             while (capture_ctx_queue->running()) {
               // Release the display before reenumerating displays, since some capture backends
               // only support a single display session per device/application.
@@ -1409,18 +1417,21 @@ namespace video {
               // Not when a display switch is pending: that asks for a specific display by index,
               // which only refresh_displays() can resolve. It also keeps display_names non-empty
               // for the clamp below, which would otherwise be clamp(x, 0, -1).
-              if (!switch_display_event->peek() && platf::is_composite_display_name(proc::proc.display_name)) {
-                reset_display(disp, encoder.platform_formats->dev_type, proc::proc.display_name, capture_ctxs.front().config);
+              // Read once per attempt: the virtual-display recovery monitor may rename the
+              // target while we are retrying, and the next attempt should pick that up.
+              const auto wanted_display = proc::proc.get_display_name();
+              if (!switch_display_event->peek() && platf::is_composite_display_name(wanted_display)) {
+                reset_display(disp, encoder.platform_formats->dev_type, wanted_display, capture_ctxs.front().config);
                 if (disp) {
                   break;
                 }
 
-                BOOST_LOG(warning) << "Could not recapture ["sv << proc::proc.display_name
+                BOOST_LOG(warning) << "Could not recapture ["sv << wanted_display
                                    << "], falling back to a single display"sv;
               }
 
               // Refresh display names since a display removal might have caused the reinitialization
-              refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, proc::proc.display_name);
+              refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, wanted_display);
 
               // Process any pending display switch with the new list of displays
               if (switch_display_event->peek()) {
@@ -1430,7 +1441,7 @@ namespace video {
               // reset_display() will sleep between retries
               reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
               if (disp) {
-                proc::proc.display_name = display_names[display_p];
+                proc::proc.set_display_name(display_names[display_p]);
                 break;
               }
             }

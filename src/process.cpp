@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -56,6 +57,21 @@ namespace proc {
   namespace pt = boost::property_tree;
 
   proc_t proc;
+
+  namespace {
+    // proc_t is movable (KITTY_DEFAULT_CONSTR_MOVE_THROW), a mutex is not; there is only one proc_t.
+    std::mutex display_name_mutex;
+  }  // namespace
+
+  std::string proc_t::get_display_name() const {
+    std::lock_guard lock {display_name_mutex};
+    return _display_name;
+  }
+
+  void proc_t::set_display_name(std::string name) {
+    std::lock_guard lock {display_name_mutex};
+    _display_name = std::move(name);
+  }
 
   int input_only_app_id = -1;
   std::string input_only_app_id_str;
@@ -314,9 +330,13 @@ namespace proc {
         // We need to track it properly to remove the display when the session terminates.
         launch_session->virtual_display = true;
 
+        // What the recovery monitor needs to bring each display back as it was created.
+        std::vector<VDISPLAY::recovery::display_spec_t> recovery_specs;
+
         auto create_displays = [&]() -> bool {
           const bool multi_display = displays.size() > 1;
           bool all_created = true;
+          recovery_specs.clear();
 
           for (std::size_t i = 0; i < displays.size(); i++) {
             auto &display = displays[i];
@@ -386,6 +406,8 @@ namespace proc {
                             << " [" << display.width << 'x' << display.height
                             << " at " << display.x << ',' << display.y << "] as \""
                             << display_label << "\" serial " << display_serial;
+
+            recovery_specs.push_back({display.guid, display_serial, display_label, (uint32_t) display.width, (uint32_t) display.height, (uint32_t) target_fps, display.device_name});
 
             // Don't change display settings when no params are given
             if (launch_session->width && launch_session->height && launch_session->fps) {
@@ -460,7 +482,7 @@ namespace proc {
         if (created != displays.end()) {
           // Set virtual_display to true when everything went fine
           this->virtual_display = true;
-          this->display_name = platf::to_utf8(created->device_name);
+          this->set_display_name(platf::to_utf8(created->device_name));
 
           // Capture spans every emulated display at once, so the capture side is handed all
           // of their names joined together and assembles one picture the size of their
@@ -476,7 +498,7 @@ namespace proc {
             }
 
             if (capture_names.size() > 1) {
-              this->display_name = platf::join_display_names(capture_names);
+              this->set_display_name(platf::join_display_names(capture_names));
               BOOST_LOG(info) << "Capturing "sv << capture_names.size() << " displays as one picture"sv;
             }
           }
@@ -486,6 +508,48 @@ namespace proc {
           // empty name when probing graphics cards.
 
           config::video.output_name = display_device::map_display_name(platf::to_utf8(created->device_name));
+
+          // Bring the displays back if they vanish under the stream: the driver's watchdog
+          // fires, the driver restarts, or someone disables the monitor. Without this the
+          // capture quietly falls back to the physical display for the rest of the session.
+          // Positions are kept so a re-created layout lands where the client expects it.
+          std::vector<VDISPLAY::LayoutEntry> geometry;
+          for (const auto &display : displays) {
+            if (!display.device_name.empty()) {
+              geometry.push_back({display.device_name, display.x, display.y, display.width, display.height, display.primary});
+            }
+          }
+
+          VDISPLAY::recovery::start(std::move(recovery_specs), {
+            .ensure_driver = [] {
+              if (vDisplayDriverStatus != VDISPLAY::DRIVER_STATUS::OK) {
+                initVDisplayDriver();
+              }
+              if (vDisplayDriverStatus != VDISPLAY::DRIVER_STATUS::OK) {
+                return false;
+              }
+              VDISPLAY::applyRenderAdapterPreference(platf::from_utf8(config::video.adapter_name));
+              return true;
+            },
+            .on_recreated = [this, geometry = std::move(geometry), target_fps](const std::vector<VDISPLAY::recovery::display_spec_t> &specs) mutable {
+              std::vector<std::string> names;
+              for (std::size_t i = 0; i < specs.size(); i++) {
+                names.push_back(platf::to_utf8(specs[i].device_name));
+                if (i < geometry.size()) {
+                  geometry[i].deviceName = specs[i].device_name;
+                }
+              }
+
+              if (specs.size() > 1) {
+                if (VDISPLAY::applyVirtualDisplayLayout(geometry, target_fps) != ERROR_SUCCESS) {
+                  BOOST_LOG(warning) << "Virtual display recovery: could not restore the requested arrangement"sv;
+                }
+                this->set_display_name(platf::join_display_names(names));
+              } else {
+                this->set_display_name(names.front());
+              }
+            },
+          });
         }
       } else {
         // Driver isn't working so we don't need to track virtual display.
@@ -669,7 +733,7 @@ namespace proc {
       }
 
       retryInterval = 200ms;
-      while (this->display_name.empty()) {
+      while (this->get_display_name().empty()) {
         if (retryInterval > 2s) {
           BOOST_LOG(warning) << "Not getting current display in time! HDR will not be toggled.";
           return;
@@ -679,7 +743,7 @@ namespace proc {
       }
 
       // We should have got the actual streaming display by now
-      std::string currentDisplay = this->display_name;
+      std::string currentDisplay = this->get_display_name();
       auto currentDisplayW = platf::from_utf8(currentDisplay);
 
       initial_hdr = VDISPLAY::getDisplayHDRByName(currentDisplayW.c_str());
@@ -915,6 +979,9 @@ namespace proc {
       }
     }
 
+    // Before anything is removed on purpose, or the monitor would put it straight back.
+    VDISPLAY::recovery::stop();
+
     bool used_virtual_display = vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK && _launch_session && _launch_session->virtual_display;
     if (used_virtual_display) {
       // Remove every display we created, not just the first: a failure partway through
@@ -961,7 +1028,7 @@ namespace proc {
     _app_id = -1;
     _app_name.clear();
     _app = {};
-    display_name.clear();
+    set_display_name({});
     initial_display.clear();
     mode_changed_display.clear();
     _launch_session.reset();
