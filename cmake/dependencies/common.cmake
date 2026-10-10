@@ -71,6 +71,9 @@ endif()
 set(FFMPEG_INCLUDE_DIRS
         "${FFMPEG_PREPARED_BINARIES}/include")
 
+# PyroWave codec library (optional)
+include("${CMAKE_MODULE_PATH}/dependencies/pyrowave.cmake")
+
 # platform specific dependencies
 if(WIN32)
     include("${CMAKE_MODULE_PATH}/dependencies/windows.cmake")

@@ -18,6 +18,14 @@ option(SUNSHINE_CONFIGURE_ONLY "Configure special files only, then exit." OFF)
 
 option(SUNSHINE_ENABLE_TRAY "Enable system tray icon." ON)
 
+# PyroWave (intra-only GPU wavelet codec, docs/pyrowave-protocol.md). Only the
+# Windows host encoder exists; elsewhere the host never advertises the codec.
+if(WIN32)
+    option(SUNSHINE_ENABLE_PYROWAVE "Enable the PyroWave video codec." ON)
+else()
+    option(SUNSHINE_ENABLE_PYROWAVE "Enable the PyroWave video codec." OFF)
+endif()
+
 option(SUNSHINE_SYSTEM_WAYLAND_PROTOCOLS "Use system installation of wayland-protocols rather than the submodule." OFF)
 
 if(APPLE)
