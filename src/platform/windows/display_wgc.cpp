@@ -15,8 +15,11 @@
 
 // local includes
 #include "display.h"
+#include "ipc/ipc_session.h"
+#include "ipc/misc_utils.h"
 #include "misc.h"
 #include "src/logging.h"
+#include "wgc_capture_policy.h"
 
 namespace platf {
   using namespace std::literals;
@@ -216,7 +219,11 @@ namespace platf::dxgi {
       return capture_e::error;
     }
     capture_access->GetInterface(IID_ID3D11Texture2D, (void **) out);
-    out_time = consumed_frame.SystemRelativeTime().count();  // raw ticks from query performance counter
+    // SystemRelativeTime is 100 ns units on the QPC timebase, not QPC ticks: the two only
+    // coincide when the counter runs at 10 MHz, and every frame timestamp was off otherwise.
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    out_time = wgc_policy::system_relative_time_to_qpc(consumed_frame.SystemRelativeTime().count(), frequency.QuadPart);
     return capture_e::ok;
   }
 
@@ -240,7 +247,8 @@ namespace platf::dxgi {
   }
 
   int display_wgc_ram_t::init(const ::video::config_t &config, const std::string &display_name) {
-    if (display_base_t::init(config, display_name) || dup.init(this, config)) {
+    dup = make_wgc_source();
+    if (display_base_t::init(config, display_name, false) || dup->init(this, config)) {
       return -1;
     }
 
@@ -259,8 +267,8 @@ namespace platf::dxgi {
     HRESULT status;
     texture2d_t src;
     uint64_t frame_qpc;
-    dup.set_cursor_visible(cursor_visible);
-    auto capture_status = dup.next_frame(timeout, &src, frame_qpc);
+    dup->set_cursor_visible(cursor_visible);
+    auto capture_status = dup->next_frame(timeout, &src, frame_qpc);
     if (capture_status != capture_e::ok) {
       return capture_status;
     }
@@ -341,6 +349,137 @@ namespace platf::dxgi {
   }
 
   capture_e display_wgc_ram_t::release_snapshot() {
-    return dup.release_frame();
+    return dup->release_frame();
+  }
+  wgc_ipc_capture_t::wgc_ipc_capture_t() = default;
+
+  wgc_ipc_capture_t::~wgc_ipc_capture_t() {
+    release_frame();
+  }
+
+  int wgc_ipc_capture_t::init(display_base_t *display, const ::video::config_t &config) {
+    DXGI_OUTPUT_DESC output_desc;
+    display->output->GetDesc(&output_desc);
+
+    session = std::make_unique<ipc_session_t>();
+    if (session->init(config, platf::to_utf8(output_desc.DeviceName), display->device.get(), display->is_hdr())) {
+      return -1;
+    }
+
+    // The helper picks the format; with a single shared texture it is known as soon as the
+    // session is up, and display_base_t needs it before the first frame.
+    session->initialize_if_needed();
+    D3D11_TEXTURE2D_DESC desc;
+    if (!session->is_initialized() || !session->peek_shared_texture_desc(desc)) {
+      BOOST_LOG(error) << "The WGC capture helper did not start (tools\\sunshine_wgc_capture.exe)"sv;
+      return -1;
+    }
+    display->capture_format = desc.Format;
+    return 0;
+  }
+
+  capture_e wgc_ipc_capture_t::next_frame(std::chrono::milliseconds timeout, ID3D11Texture2D **out, uint64_t &out_time) {
+    release_frame();
+
+    // The factory picks the capture method, so every "this source can no longer work" case
+    // is a reinit: the next one lands on DXGI for the secure desktop, or restarts a helper
+    // that crashed.
+    if (session->should_swap_to_dxgi() || session->should_reinit()) {
+      return capture_e::reinit;
+    }
+    session->initialize_if_needed();
+    if (!session->is_initialized()) {
+      BOOST_LOG(warning) << "The WGC capture helper is not running; requesting a capture reinit"sv;
+      return capture_e::reinit;
+    }
+
+    winrt::com_ptr<ID3D11Texture2D> texture;
+    auto status = session->acquire(timeout, texture, out_time);
+    if (status == capture_e::timeout) {
+      // The helper learns about UAC and the lock screen from a desktop-switch hook running
+      // with the user's token, and that notification can be missed. A stall while the secure
+      // desktop is up would freeze the stream on the last frame, so check from here too.
+      constexpr auto first_probe_after = 200ms;
+      constexpr auto probe_interval = 250ms;
+      const auto now = std::chrono::steady_clock::now();
+      if (stall_start == std::chrono::steady_clock::time_point {}) {
+        stall_start = now;
+        last_secure_desktop_probe = {};
+      }
+      if (now - stall_start >= first_probe_after && now - last_secure_desktop_probe >= probe_interval) {
+        last_secure_desktop_probe = now;
+        if (is_secure_desktop_active()) {
+          BOOST_LOG(info) << "WGC frames stalled while the secure desktop is active; falling back to DXGI capture"sv;
+          note_wgc_desktop_switch();
+          return capture_e::reinit;
+        }
+      }
+      return status;
+    }
+    if (status != capture_e::ok) {
+      return status;
+    }
+
+    stall_start = {};
+    frame_locked = true;
+    *out = texture.detach();
+    return capture_e::ok;
+  }
+
+  capture_e wgc_ipc_capture_t::release_frame() {
+    if (frame_locked && session) {
+      session->release();
+      frame_locked = false;
+    }
+    return capture_e::ok;
+  }
+
+  int wgc_ipc_capture_t::set_cursor_visible(bool) {
+    return 0;
+  }
+
+  std::unique_ptr<wgc_source_t> make_wgc_source() {
+    // In-process capture needs an interactive desktop. The service runs in session 0, which
+    // has none, so it captures through the helper in the user's session instead.
+    if (is_running_as_system()) {
+      return std::make_unique<wgc_ipc_capture_t>();
+    }
+    return std::make_unique<wgc_capture_t>();
+  }
+
+  bool wgc_needs_dxgi_fallback() {
+    return is_secure_desktop_active() || recent_wgc_desktop_switch_grace_active();
+  }
+
+  namespace {
+    // Desktop Duplication sees the secure desktop; WGC does not. Hand back to WGC once it is
+    // gone (and the post-switch grace has passed), checking every couple of seconds.
+    bool secure_desktop_gone(std::chrono::steady_clock::time_point &last_check) {
+      constexpr auto check_interval = 2s;
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_check < check_interval) {
+        return false;
+      }
+      last_check = now;
+      if (wgc_needs_dxgi_fallback()) {
+        return false;
+      }
+      BOOST_LOG(info) << "Secure desktop gone; switching back to WGC capture"sv;
+      return true;
+    }
+  }  // namespace
+
+  capture_e display_secure_desktop_vram_t::snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) {
+    if (secure_desktop_gone(last_check)) {
+      return capture_e::reinit;
+    }
+    return display_ddup_vram_t::snapshot(pull_free_image_cb, img_out, timeout, cursor_visible);
+  }
+
+  capture_e display_secure_desktop_ram_t::snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) {
+    if (secure_desktop_gone(last_check)) {
+      return capture_e::reinit;
+    }
+    return display_ddup_ram_t::snapshot(pull_free_image_cb, img_out, timeout, cursor_visible);
   }
 }  // namespace platf::dxgi

@@ -2747,9 +2747,12 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
     <tr>
         <td>wgc</td>
-        <td>(beta feature) Use Windows.Graphics.Capture to capture the display.
-            @note{Applies to Windows only.}
-            @attention{This capture method is not compatible with the Sunshine service.}</td>
+        <td>Use Windows.Graphics.Capture to capture the display. It captures every frame of frame-generated
+            games and keeps working when the game exhausts video memory. When LavApollo runs as a service, a
+            helper (`tools/sunshine_wgc_capture.exe`) captures in the signed-in user's session. UAC prompts and
+            the lock screen are captured with Desktop Duplication, switching back automatically. Several
+            emulated displays are always captured with Desktop Duplication.
+            @note{Applies to Windows only.}</td>
     </tr>
 </table>
 

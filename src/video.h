@@ -54,6 +54,9 @@ namespace video {
     // framing aligns to, and the framing the client asked for (rtsp.cpp).
     int packetsize = 0;
     pyrowave::policy::framing_e pyrowave_framing = pyrowave::policy::framing_e::records;
+
+    // The client paces playback from RTP timestamps (VRR): keep capture queues minimal.
+    bool vrr_low_latency = false;
   };
 
   platf::mem_type_e map_base_dev_type(AVHWDeviceType type);

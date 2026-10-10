@@ -136,6 +136,30 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
     frame-gen fixes are ported; with them on, the limiter would rewrite `frame_limit_type` and enable
     itself on every virtual-display session.
 
+- **WGC capture from the service** (ported from Vibepollo). Windows.Graphics.Capture needs an
+  interactive desktop, which the SYSTEM service in session 0 does not have, so `capture = wgc` used to
+  fail there. `make_wgc_source()` now picks between two `wgc_source_t`: in-process `wgc_capture_t` when
+  the host runs as the user, `wgc_ipc_capture_t` as the service. The latter drives
+  `tools/sunshine_wgc_capture.exe`, launched in the user's session by `ipc/process_handler`, which
+  captures there and publishes each frame into a texture shared with our device (keyed mutex, frame-
+  ready event, metadata in shared memory; wire structs in `ipc/pipes.h`, **compiled into both sides**).
+  - ⚠️ **The secure desktop (UAC, lock screen, login) is invisible to WGC.** The factory captures it
+    with Desktop Duplication (`display_secure_desktop_{vram,ram}_t`), which asks for a reinit every 2 s
+    once it is gone; `wgc_ipc_capture_t` also probes it itself when frames stall, because the helper's
+    desktop-switch hook runs with the user's token and can miss the switch.
+  - ⚠️ **The emulated multi-display never takes this path**: `platf::display()` returns
+    `display_composite_vram_t` for a `+`-joined name before it looks at `capture`. Extending WGC to
+    composites would mean one helper per display; not done.
+  - WGC display init skips the Desktop Duplication test (`display_base_t::init(..., false)`): WGC is
+    what still works when duplication does not.
+  - `SystemRelativeTime` is 100 ns units on the QPC timebase, **not QPC ticks**; the in-process path
+    used it raw, which skewed every frame timestamp unless QPC runs at 10 MHz
+    (`wgc_policy::system_relative_time_to_qpc`).
+  - The helper always draws the cursor, logs to `%APPDATA%\LavApollo\sunshine_wgc_helper.log` of the
+    user, and is built from `src/logging.cpp` with `SUNSHINE_EXTERNAL_PROCESS` (no FFmpeg, no
+    libdisplaydevice). The `severity` log keyword moved to `logging.h` for it.
+  - `video::config_t::vrr_low_latency` is appended (for VRR): it shrinks the helper's frame pool to one.
+
 - **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
   previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
   IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in

@@ -6,7 +6,11 @@
 
 // lib includes
 #include <boost/log/common.hpp>
+#include <boost/log/expressions/keyword.hpp>
 #include <boost/log/sinks.hpp>
+
+// Shared with helper executables, which adjust the log filter themselves.
+BOOST_LOG_ATTRIBUTE_KEYWORD(severity, "Severity", int)
 
 using text_sink = boost::log::sinks::asynchronous_sink<boost::log::sinks::text_ostream_backend>;
 

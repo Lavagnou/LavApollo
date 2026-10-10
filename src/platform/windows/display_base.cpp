@@ -428,7 +428,7 @@ namespace platf::dxgi {
     }
   }
 
-  int display_base_t::init(const ::video::config_t &config, const std::string &display_name) {
+  int display_base_t::init(const ::video::config_t &config, const std::string &display_name, bool require_duplication) {
     std::once_flag windows_cpp_once_flag;
 
     std::call_once(windows_cpp_once_flag, []() {
@@ -492,7 +492,7 @@ namespace platf::dxgi {
             continue;
           }
 
-          if (desc.AttachedToDesktop && test_dxgi_duplication(adapter_tmp, output_tmp, false)) {
+          if (desc.AttachedToDesktop && (!require_duplication || test_dxgi_duplication(adapter_tmp, output_tmp, false))) {
             output = std::move(output_tmp);
 
             offset_x = desc.DesktopCoordinates.left;
@@ -1022,6 +1022,23 @@ namespace platf {
       } else if (hwdevice_type == mem_type_e::system) {
         auto disp = std::make_shared<dxgi::display_ddup_ram_t>();
 
+        if (!disp->init(config, display_name)) {
+          return disp;
+        }
+      }
+    }
+
+    // WGC cannot see the secure desktop (UAC prompt, lock screen); capture it through Desktop
+    // Duplication until it is gone, then those classes ask for a reinit to come back here.
+    if (config::video.capture == "wgc" && dxgi::wgc_needs_dxgi_fallback()) {
+      BOOST_LOG(info) << "Secure desktop active; capturing it with Desktop Duplication instead of WGC"sv;
+      if (hwdevice_type == mem_type_e::dxgi) {
+        auto disp = std::make_shared<dxgi::display_secure_desktop_vram_t>();
+        if (!disp->init(config, display_name)) {
+          return disp;
+        }
+      } else if (hwdevice_type == mem_type_e::system) {
+        auto disp = std::make_shared<dxgi::display_secure_desktop_ram_t>();
         if (!disp->init(config, display_name)) {
           return disp;
         }

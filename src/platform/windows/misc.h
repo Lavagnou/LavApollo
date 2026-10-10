@@ -40,6 +40,12 @@ namespace platf {
   bool is_running_as_system();
 
   /**
+   * @brief The interactive user's token (elevated if asked and available); nullptr when no one is logged on.
+   * @note Only works as SYSTEM. The caller closes the handle.
+   */
+  HANDLE retrieve_users_token(bool elevated);
+
+  /**
    * @brief Read a file's VS_FIXEDFILEINFO version as "major.minor.build.revision".
    */
   bool getFileVersionInfo(const std::filesystem::path &file_path, std::string &version_str);

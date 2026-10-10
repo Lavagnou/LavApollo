@@ -21,15 +21,19 @@
 #include "logging.h"
 
 // conditional includes
+// SUNSHINE_EXTERNAL_PROCESS: compiled into a helper executable (tools/sunshine_wgc_capture),
+// which links neither FFmpeg nor libdisplaydevice and has no logs of theirs to forward.
 #ifdef __ANDROID__
   #include <android/log.h>
-#else
+#elif !defined(SUNSHINE_EXTERNAL_PROCESS)
   #include <display_device/logging.h>
 #endif
 
+#ifndef SUNSHINE_EXTERNAL_PROCESS
 extern "C" {
-#include <libavutil/log.h>
+  #include <libavutil/log.h>
 }
+#endif
 
 using namespace std::literals;
 
@@ -47,7 +51,6 @@ bl::sources::severity_logger<int> fatal(5);  // Unrecoverable errors
 bl::sources::severity_logger<int> tests(10);  // Automatic tests output
 #endif
 
-BOOST_LOG_ATTRIBUTE_KEYWORD(severity, "Severity", int)
 
 namespace logging {
   deinit_t::~deinit_t() {
@@ -168,7 +171,7 @@ namespace logging {
       }
     }
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(SUNSHINE_EXTERNAL_PROCESS)
     setup_av_logging(min_log_level);
     setup_libdisplaydevice_logging(min_log_level);
 #endif
@@ -197,7 +200,7 @@ namespace logging {
     return std::make_unique<deinit_t>();
   }
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(SUNSHINE_EXTERNAL_PROCESS)
   void setup_av_logging(int min_log_level) {
     if (min_log_level >= 1) {
       av_log_set_level(AV_LOG_QUIET);

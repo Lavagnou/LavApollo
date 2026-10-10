@@ -28,3 +28,28 @@ target_link_libraries(sunshinesvc
         wtsapi32
         ${PLATFORM_LIBRARIES})
 target_compile_options(sunshinesvc PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
+
+# WGC capture helper (ported from Vibepollo). Runs in the interactive user's session, where
+# Windows.Graphics.Capture works, and hands frames to the host -- which may be the SYSTEM
+# service in session 0, where it does not -- through a shared texture (src/platform/windows/ipc).
+add_executable(sunshine_wgc_capture
+        sunshine_wgc_capture.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/windows/ipc/pipes.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/windows/ipc/misc_utils.cpp
+        ${CMAKE_SOURCE_DIR}/src/logging.cpp)
+set_target_properties(sunshine_wgc_capture PROPERTIES CXX_STANDARD 23)
+target_compile_definitions(sunshine_wgc_capture PRIVATE SUNSHINE_EXTERNAL_PROCESS=1)
+target_link_libraries(sunshine_wgc_capture
+        ${Boost_LIBRARIES}
+        ${CMAKE_THREAD_LIBS_INIT}
+        d3d11
+        dxgi
+        ole32
+        user32
+        gdi32
+        windowsapp
+        avrt
+        shcore
+        wtsapi32
+        ${PLATFORM_LIBRARIES})
+target_compile_options(sunshine_wgc_capture PRIVATE ${SUNSHINE_COMPILE_OPTIONS})

@@ -156,7 +156,11 @@ namespace platf::dxgi {
 
   class display_base_t: public display_t {
   public:
-    int init(const ::video::config_t &config, const std::string &display_name);
+    /**
+     * @param require_duplication Pick only outputs Desktop Duplication can capture. WGC
+     *        passes false: it is what still works when duplication does not.
+     */
+    int init(const ::video::config_t &config, const std::string &display_name, bool require_duplication = true);
 
     capture_e capture(const push_captured_image_cb_t &push_captured_image_cb, const pull_free_image_cb_t &pull_free_image_cb, bool *cursor) override;
 
@@ -423,9 +427,25 @@ namespace platf::dxgi {
   };
 
   /**
-   * Display duplicator that uses the Windows.Graphics.Capture API.
+   * A source of Windows.Graphics.Capture frames: in this process, or from the helper.
    */
-  class wgc_capture_t {
+  class wgc_source_t {
+  public:
+    virtual ~wgc_source_t() = default;
+    virtual int init(display_base_t *display, const ::video::config_t &config) = 0;
+    /// The texture is valid until release_frame(); out_time is a QPC tick count.
+    virtual capture_e next_frame(std::chrono::milliseconds timeout, ID3D11Texture2D **out, uint64_t &out_time) = 0;
+    virtual capture_e release_frame() = 0;
+    virtual int set_cursor_visible(bool) = 0;
+  };
+
+  /**
+   * Display duplicator that uses the Windows.Graphics.Capture API in this process.
+   *
+   * Only works in an interactive session: as the SYSTEM service (session 0) there is no
+   * desktop to capture, and wgc_ipc_capture_t is used instead.
+   */
+  class wgc_capture_t: public wgc_source_t {
     winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice uwp_device {nullptr};
     winrt::Windows::Graphics::Capture::GraphicsCaptureItem item {nullptr};
     winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool frame_pool {nullptr};
@@ -438,19 +458,49 @@ namespace platf::dxgi {
 
   public:
     wgc_capture_t();
-    ~wgc_capture_t();
+    ~wgc_capture_t() override;
 
-    int init(display_base_t *display, const ::video::config_t &config);
-    capture_e next_frame(std::chrono::milliseconds timeout, ID3D11Texture2D **out, uint64_t &out_time);
-    capture_e release_frame();
-    int set_cursor_visible(bool);
+    int init(display_base_t *display, const ::video::config_t &config) override;
+    capture_e next_frame(std::chrono::milliseconds timeout, ID3D11Texture2D **out, uint64_t &out_time) override;
+    capture_e release_frame() override;
+    int set_cursor_visible(bool) override;
   };
+
+  /**
+   * Windows.Graphics.Capture through the sunshine_wgc_capture helper (ported from Vibepollo).
+   *
+   * The helper runs in the user's session, captures there and publishes each frame into a
+   * texture shared with our device, guarded by a keyed mutex. next_frame() holds that mutex
+   * until release_frame(), so the helper never overwrites a frame we are still copying.
+   * The helper always draws the cursor; set_cursor_visible() cannot change that.
+   */
+  class wgc_ipc_capture_t: public wgc_source_t {
+    std::unique_ptr<class ipc_session_t> session;
+    bool frame_locked = false;
+    std::chrono::steady_clock::time_point stall_start {};
+    std::chrono::steady_clock::time_point last_secure_desktop_probe {};
+
+  public:
+    wgc_ipc_capture_t();
+    ~wgc_ipc_capture_t() override;
+
+    int init(display_base_t *display, const ::video::config_t &config) override;
+    capture_e next_frame(std::chrono::milliseconds timeout, ID3D11Texture2D **out, uint64_t &out_time) override;
+    capture_e release_frame() override;
+    int set_cursor_visible(bool) override;
+  };
+
+  /// The WGC source this process can use: in-process when interactive, the helper as the service.
+  std::unique_ptr<wgc_source_t> make_wgc_source();
+
+  /// Whether WGC cannot see the desktop right now (UAC prompt, lock screen, or just left one).
+  bool wgc_needs_dxgi_fallback();
 
   /**
    * Display backend that uses Windows.Graphics.Capture with a software encoder.
    */
   class display_wgc_ram_t: public display_ram_t {
-    wgc_capture_t dup;
+    std::unique_ptr<wgc_source_t> dup;
 
   public:
     int init(const ::video::config_t &config, const std::string &display_name);
@@ -462,11 +512,28 @@ namespace platf::dxgi {
    * Display backend that uses Windows.Graphics.Capture with a hardware encoder.
    */
   class display_wgc_vram_t: public display_vram_t {
-    wgc_capture_t dup;
+    std::unique_ptr<wgc_source_t> dup;
 
   public:
     int init(const ::video::config_t &config, const std::string &display_name);
     capture_e snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) override;
     capture_e release_snapshot() override;
+  };
+  /**
+   * Desktop Duplication used while the secure desktop (UAC prompt, lock screen) hides it from
+   * Windows.Graphics.Capture. Asks for a reinit once it is gone, so the factory swaps back.
+   */
+  class display_secure_desktop_vram_t: public display_ddup_vram_t {
+    std::chrono::steady_clock::time_point last_check {};
+
+  public:
+    capture_e snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) override;
+  };
+
+  class display_secure_desktop_ram_t: public display_ddup_ram_t {
+    std::chrono::steady_clock::time_point last_check {};
+
+  public:
+    capture_e snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, std::chrono::milliseconds timeout, bool cursor_visible) override;
   };
 }  // namespace platf::dxgi
