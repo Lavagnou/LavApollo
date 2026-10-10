@@ -143,6 +143,15 @@ Google Test, built as part of the normal build (disable with `-DBUILD_TESTS=OFF`
 Note `tests/CMakeLists.txt` forces `-O0` plus gcov flags for the test target, so a test build is not a
 representative build for performance work on the streaming path.
 
+Known red on `master`, unrelated to this fork's work: `DisplayDeviceConfigTest/DisplayModeRemapping.*` and
+`ParseRefreshRateOption.*` (28) and `MdnsInstanceNameTests/*` (3). `PairingTest.Run/0` is skipped: since
+Apollo, a successful `clientpairingsecret()` erases the session from nvhttp's private map and saves the
+client list, which the test cannot set up. Compare a change against this list, not against "all green".
+
+On Windows, build the tests from PowerShell or cmd, not MSYS bash: under bash `TMP` does not reach the
+compiler and gcc fails with "Cannot create temporary file in C:\Windows\". Keep the build directory path
+short too -- `ar` fails on object paths past `MAX_PATH`.
+
 Lint: C++ is checked against `.clang-format`.
 
 ```bash
