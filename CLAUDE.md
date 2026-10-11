@@ -227,6 +227,33 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
   - The archive URL and SHA-256 (`prepare-vhf-gamepad.ps1`) and the submodule commit move **together**.
   - `install.ps1` is always best effort (exit 0): a failing gamepad driver must not fail the installer.
 
+- **Web UI logins** (`src/web_auth.{h,cpp}`, after Vibepollo's session tokens, **without its API tokens**).
+  The previous login was one in-memory cookie hash, so a second browser logged the first out and a
+  restart logged everyone out. "Remember Password" kept the password itself in `localStorage`; `login.html`
+  now deletes that key.
+  - Login issues a **session token** (`session_token_ttl_seconds`, 2 h) and a **refresh token**: 24 h, or
+    `remember_me_refresh_token_ttl_seconds` (7 days) with "Remember me". Both are sent as `__Host-` cookies,
+    `HttpOnly; Secure; SameSite=Strict`. Without "Remember me" they are browser-session cookies.
+  - Each refresh replaces **both** tokens, and the old refresh token stops working. The refresh lifetime
+    **does not slide**. A login keeps a stable `id` across refreshes, which revocation uses
+    (`DELETE /api/auth/sessions/{id}`, listed on the password page).
+  - ⚠️ **Stored in `lavapollo_auth.json`** next to the state file (token hashes only, atomic write with
+    `MoveFileExW`). **Never in `sunshine_state.json`**: `nvhttp::save_state()` rebuilds that file from scratch.
+  - Expiry handling:
+    - A **page** load with an expired session token but a good refresh cookie is refreshed inside
+      `authenticate()`, which 307-redirects to the same URL with the new cookies.
+    - An **API** call gets a 401. `init.js` wraps `window.fetch`: on a 401 it calls
+      `/api/auth/refresh` once, shared by concurrent calls (two refreshes in flight would spend the same
+      cookie), then retries. If the refresh fails, it sends the browser to the login page.
+  - `savePassword` revokes every login.
+  - ⚠️ **CSRF**: `start()` wraps **every** POST/PUT/PATCH/DELETE route in `check_csrf()` after
+    registration, so routes added later are covered too. A request passes when:
+    - it has no `Origin` and no `Referer` (scripts);
+    - its origin is `https://` + the request's own `Host`. This is what keeps the UI working when opened
+      by LAN IP, host name or localhost;
+    - its origin is listed in `csrf_allowed_origins`;
+    - or it carries a valid `X-CSRF-Token` from `GET /api/csrf-token` (per client IP, 1 h).
+
 - **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
   previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
   IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in

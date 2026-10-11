@@ -31,6 +31,9 @@
           <li class="nav-item">
             <ThemeToggle/>
           </li>
+          <li class="nav-item">
+            <a class="nav-link" href="./login" @click.prevent="logout"><i class="fas fa-fw fa-sign-out-alt"></i> {{ $t('navbar.logout') }}</a>
+          </li>
         </ul>
       </div>
     </div>
@@ -48,6 +51,12 @@ export default {
   mounted() {
     let el = document.querySelector("a[href='" + document.location.pathname + "']");
     if (el) el.classList.add("active")
+  },
+  methods: {
+    logout() {
+      fetch("./api/auth/logout", { method: "POST", credentials: "include" })
+        .finally(() => { location.href = "./login" })
+    }
   }
 }
 </script>

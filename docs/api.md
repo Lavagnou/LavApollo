@@ -2,8 +2,16 @@
 
 Sunshine has a RESTful API which can be used to interact with the service.
 
-Unless otherwise specified, authentication is required for all API calls. You can authenticate using
-basic authentication with the admin username and password.
+Unless otherwise specified, authentication is required for all API calls. `POST /api/login` with the
+admin username and password (and optionally `"remember_me": true`) sets two `HttpOnly` cookies:
+`__Host-apollo_session`, presented by every call, and `__Host-apollo_refresh`, which
+`POST /api/auth/refresh` trades for a new pair once the session cookie has expired (a call then returns
+401). Each refresh spends the refresh cookie it presents.
+
+State-changing calls (`POST`, `PUT`, `PATCH`, `DELETE`) are refused with 403 when their `Origin` (or
+`Referer`) is neither the address the web UI is served from nor listed in `csrf_allowed_origins`, unless
+they carry an `X-CSRF-Token` header from `GET /api/csrf-token`. Calls without either header (scripts,
+curl) are not affected.
 
 @htmlonly
 <script src="api.js"></script>
@@ -20,6 +28,18 @@ basic authentication with the admin username and password.
 
 ## DELETE /api/apps/{index}
 @copydoc confighttp::deleteApp()
+
+## POST /api/auth/logout
+@copydoc confighttp::logout()
+
+## POST /api/auth/refresh
+@copydoc confighttp::refreshSession()
+
+## GET /api/auth/sessions
+@copydoc confighttp::getSessions()
+
+## DELETE /api/auth/sessions/{id}
+@copydoc confighttp::revokeSession()
 
 ## GET /api/clients/list
 @copydoc confighttp::getClients()
@@ -41,6 +61,9 @@ basic authentication with the admin username and password.
 
 ## POST /api/covers/upload
 @copydoc confighttp::uploadCover()
+
+## GET /api/csrf-token
+@copydoc confighttp::getCSRFToken()
 
 ## GET /api/logs
 @copydoc confighttp::getLogs()

@@ -310,6 +310,11 @@ namespace config {
     std::vector<prep_cmd_t> prep_cmds;
     std::vector<prep_cmd_t> state_cmds;
     std::vector<server_cmd_t> server_cmds;
+
+    // Web UI logins (web_auth.h)
+    std::chrono::seconds session_token_ttl;  ///< Lifetime of a session token before it must be refreshed
+    std::chrono::seconds remember_me_refresh_token_ttl;  ///< How long "remember me" keeps a login
+    std::vector<std::string> csrf_allowed_origins;  ///< https:// origins allowed besides the UI's own
   };
 
   /**

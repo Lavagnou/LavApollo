@@ -426,7 +426,7 @@
     "wan_encryption_mode_desc": "Detta avgör när kryptering kommer att användas vid streaming över Internet. Kryptering kan minska streamingprestandan, särskilt på mindre kraftfulla värdar och klienter."
   },
   "login": {
-    "save_password": "Kom ihåg lösenord"
+    "remember_me": "Kom ihåg mig"
   },
   "index": {
     "description": "Apollo är en självhostad spelstreaming-värd för Moonlight.",

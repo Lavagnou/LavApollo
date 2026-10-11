@@ -120,6 +120,30 @@ const effectivePort = computed(() => +config.value?.port ?? defaultMoonlightPort
       <div class="form-text">{{ $t('config.origin_web_ui_allowed_desc') }}</div>
     </div>
 
+    <!-- Web UI session lifetime -->
+    <div class="mb-3">
+      <label for="session_token_ttl_seconds" class="form-label">{{ $t('config.session_token_ttl_seconds') }}</label>
+      <input type="number" min="60" class="form-control" id="session_token_ttl_seconds" placeholder="7200"
+             v-model="config.session_token_ttl_seconds" />
+      <div class="form-text">{{ $t('config.session_token_ttl_seconds_desc') }}</div>
+    </div>
+
+    <!-- "Remember me" lifetime -->
+    <div class="mb-3">
+      <label for="remember_me_refresh_token_ttl_seconds" class="form-label">{{ $t('config.remember_me_refresh_token_ttl_seconds') }}</label>
+      <input type="number" min="60" class="form-control" id="remember_me_refresh_token_ttl_seconds" placeholder="604800"
+             v-model="config.remember_me_refresh_token_ttl_seconds" />
+      <div class="form-text">{{ $t('config.remember_me_refresh_token_ttl_seconds_desc') }}</div>
+    </div>
+
+    <!-- Extra allowed origins -->
+    <div class="mb-3">
+      <label for="csrf_allowed_origins" class="form-label">{{ $t('config.csrf_allowed_origins') }}</label>
+      <input type="text" class="form-control" id="csrf_allowed_origins" placeholder="[https://apollo.example.com]"
+             v-model="config.csrf_allowed_origins" />
+      <div class="form-text">{{ $t('config.csrf_allowed_origins_desc') }}</div>
+    </div>
+
     <!-- External IP -->
     <div class="mb-3">
       <label for="external_ip" class="form-label">{{ $t('config.external_ip') }}</label>

@@ -2153,6 +2153,81 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
 </table>
 
+### session_token_ttl_seconds
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            How long a web UI session token is valid, in seconds. When it runs out, the browser trades its
+            refresh token for a new pair without asking for the password again. A shorter value limits what a
+            stolen session cookie is worth.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            7200
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            session_token_ttl_seconds = 3600
+            @endcode</td>
+    </tr>
+</table>
+
+### remember_me_refresh_token_ttl_seconds
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            How long a web UI login made with "Remember me" lasts, in seconds. It does not slide: once it runs
+            out, signing in again is required. Without "Remember me", a login lasts until the browser closes,
+            and 24 hours at most.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            604800
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            remember_me_refresh_token_ttl_seconds = 2592000
+            @endcode</td>
+    </tr>
+</table>
+
+### csrf_allowed_origins
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            `https://` origins from which a page may make changes through the web UI's API, besides the address
+            the web UI was opened by, which is always allowed. Only needed when the web UI is served under
+            another name, for example behind a reverse proxy. An origin without a port matches any port.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            (empty)
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            csrf_allowed_origins = [https://apollo.example.com]
+            @endcode</td>
+    </tr>
+</table>
+
 ### external_ip
 
 <table>

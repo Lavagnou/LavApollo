@@ -624,6 +624,9 @@ namespace config {
     {},  // prep commands
     {},  // state commands
     {},  // server commands
+    std::chrono::hours(2),  // session_token_ttl
+    std::chrono::hours(24 * 7),  // remember_me_refresh_token_ttl
+    {},  // csrf_allowed_origins
   };
 
   bool endline(char ch) {
@@ -1260,6 +1263,32 @@ namespace config {
     bool_f(vars, "auto_capture_sink", audio.auto_capture);
 
     string_restricted_f(vars, "origin_web_ui_allowed", nvhttp.origin_web_ui_allowed, {"pc"sv, "lan"sv, "wan"sv});
+
+    {
+      int ttl = 0;
+      int_between_f(vars, "session_token_ttl_seconds", ttl, {60, std::numeric_limits<int>::max()});
+      if (ttl > 0) {
+        sunshine.session_token_ttl = std::chrono::seconds(ttl);
+      }
+      ttl = 0;
+      int_between_f(vars, "remember_me_refresh_token_ttl_seconds", ttl, {60, std::numeric_limits<int>::max()});
+      if (ttl > 0) {
+        sunshine.remember_me_refresh_token_ttl = std::chrono::seconds(ttl);
+      }
+
+      std::vector<std::string> origins;
+      list_string_f(vars, "csrf_allowed_origins", origins);
+      sunshine.csrf_allowed_origins.clear();
+      for (auto &origin : origins) {
+        origin.erase(origin.begin(), std::find_if_not(origin.begin(), origin.end(), whitespace));
+        origin.erase(std::find_if_not(origin.rbegin(), origin.rend(), whitespace).base(), origin.end());
+        if (origin.size() > 8 && origin.starts_with("https://")) {
+          sunshine.csrf_allowed_origins.push_back(std::move(origin));
+        } else if (!origin.empty()) {
+          BOOST_LOG(warning) << "csrf_allowed_origins: ignoring "sv << origin << " (must be an https:// origin)"sv;
+        }
+      }
+    }
 
     int to = -1;
     int_between_f(vars, "ping_timeout", to, {-1, std::numeric_limits<int>::max()});

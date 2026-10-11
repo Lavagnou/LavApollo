@@ -41,6 +41,7 @@
 #include "utility.h"
 #include "updater.h"
 #include "uuid.h"
+#include "web_auth.h"
 
 #ifdef _WIN32
   #include "platform/windows/frame_limiter.h"
@@ -63,9 +64,59 @@ namespace confighttp {
     REMOVE  ///< Remove client
   };
 
-  // SESSION COOKIE
-  std::string sessionCookie;
-  static std::chrono::time_point<std::chrono::steady_clock> cookie_creation_time;
+  /**
+   * @brief Every web UI login, persisted next to the state file (web_auth.h).
+   * @details Its own file: `nvhttp::save_state()` rebuilds `sunshine_state.json` from scratch.
+   */
+  web_auth::session_store_t &web_sessions() {
+    static web_auth::session_store_t store {
+      std::filesystem::path {config::nvhttp.file_state}.parent_path() / "lavapollo_auth.json",
+      web_auth::default_dependencies()
+    };
+    return store;
+  }
+
+  std::string request_header(const req_https_t &request, const char *name) {
+    const auto it = request->header.find(name);
+    return it == request->header.end() ? std::string {} : it->second;
+  }
+
+  std::string request_cookie(const req_https_t &request, std::string_view name) {
+    return web_auth::cookie_value(request_header(request, "cookie"), name);
+  }
+
+  /**
+   * @brief Adds the cookies of a freshly issued token pair.
+   * @details Without "remember me" both are browser-session cookies: closing the browser ends the
+   *          login. The server still expires them on its own schedule.
+   */
+  void add_session_cookies(SimpleWeb::CaseInsensitiveMultimap &headers, const web_auth::tokens_t &tokens) {
+    std::optional<std::chrono::seconds> session_age;
+    std::optional<std::chrono::seconds> refresh_age;
+    if (tokens.remember_me) {
+      session_age = tokens.session_ttl;
+      refresh_age = tokens.refresh_ttl;
+    }
+    headers.emplace("Set-Cookie", web_auth::set_cookie(web_auth::session_cookie_name, tokens.session_token, session_age));
+    headers.emplace("Set-Cookie", web_auth::set_cookie(web_auth::refresh_cookie_name, tokens.refresh_token, refresh_age));
+  }
+
+  void add_cleared_cookies(SimpleWeb::CaseInsensitiveMultimap &headers) {
+    headers.emplace("Set-Cookie", web_auth::clear_cookie(web_auth::session_cookie_name));
+    headers.emplace("Set-Cookie", web_auth::clear_cookie(web_auth::refresh_cookie_name));
+  }
+
+  /**
+   * @brief Trades the request's refresh cookie for a new token pair, if it holds a live one.
+   */
+  std::optional<web_auth::tokens_t> refresh_from_cookie(const req_https_t &request) {
+    return web_sessions().refresh(
+      request_cookie(request, web_auth::refresh_cookie_name),
+      request_header(request, "user-agent"),
+      net::addr_to_normalized_string(request->remote_endpoint().address()),
+      config::sunshine.session_token_ttl
+    );
+  }
 
   /**
    * @brief Log the request details.
@@ -136,24 +187,6 @@ namespace confighttp {
   }
 
   /**
-   * @brief Retrieve the value of a key from a cookie string.
-   * @param cookieString The cookie header string.
-   * @param key The key to search.
-   * @return The value if found, empty string otherwise.
-   */
-  std::string getCookieValue(const std::string& cookieString, const std::string& key) {
-    std::string keyWithEqual = key + "=";
-    std::size_t startPos = cookieString.find(keyWithEqual);
-    if (startPos == std::string::npos)
-      return "";
-    startPos += keyWithEqual.length();
-    std::size_t endPos = cookieString.find(";", startPos);
-    if (endPos == std::string::npos)
-      return cookieString.substr(startPos);
-    return cookieString.substr(startPos, endPos - startPos);
-  }
-
-  /**
    * @brief Check if the IP origin is allowed.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -177,7 +210,9 @@ namespace confighttp {
    * @param needsRedirect Whether to redirect on failure.
    * @return True if authenticated, false otherwise.
    *
-   * This function uses session cookies (if set) and ensures they have not expired.
+   * Requires a live session cookie (web_auth.h). A page load whose session token has run out but
+   * whose refresh cookie is still good is refreshed here and redirected to itself; API calls get a
+   * 401 and refresh through `/api/auth/refresh` (the web UI's fetch wrapper does it).
    */
   bool authenticate(resp_https_t response, req_https_t request, bool needsRedirect = false) {
     if (!checkIPOrigin(response, request))
@@ -187,32 +222,88 @@ namespace confighttp {
       send_redirect(response, request, "/welcome");
       return false;
     }
-    // Guard: on failure, redirect if requested.
-    auto fg = util::fail_guard([&]() {
-      if (needsRedirect) {
-        std::string redir_path = "/login?redir=.";
-        redir_path += request->path;
-        send_redirect(response, request, redir_path.c_str());
-      } else {
-        send_unauthorized(response, request);
-      }
-    });
-    if (sessionCookie.empty())
-      return false;
-    // Check for expiry
-    if (std::chrono::steady_clock::now() - cookie_creation_time > SESSION_EXPIRE_DURATION) {
-      sessionCookie.clear();
+    if (web_sessions().validate(request_cookie(request, web_auth::session_cookie_name))) {
+      return true;
+    }
+
+    if (!needsRedirect) {
+      send_unauthorized(response, request);
       return false;
     }
-    auto cookies = request->header.find("cookie");
-    if (cookies == request->header.end())
+    if (auto tokens = refresh_from_cookie(request)) {
+      SimpleWeb::CaseInsensitiveMultimap headers {
+        {"X-Frame-Options", "DENY"},
+        {"Content-Security-Policy", "frame-ancestors 'none';"}
+      };
+      add_session_cookies(headers, *tokens);
+      headers.emplace("Location", request->path + (request->query_string.empty() ? "" : "?" + request->query_string));
+      response->write(SimpleWeb::StatusCode::redirection_temporary_redirect, headers);
       return false;
-    auto authCookie = getCookieValue(cookies->second, "auth");
-    if (authCookie.empty() ||
-        util::hex(crypto::hash(authCookie + config::sunshine.salt)).to_string() != sessionCookie)
-      return false;
-    fg.disable();
-    return true;
+    }
+    std::string redir_path = "/login?redir=.";
+    redir_path += request->path;
+    send_redirect(response, request, redir_path.c_str());
+    return false;
+  }
+
+  /**
+   * @brief Issued CSRF tokens, by client address (`GET /api/csrf-token`).
+   * @details Only needed by pages that are not served from the address they call -- the web UI's own
+   *          requests pass on their `Origin` alone.
+   */
+  struct csrf_tokens_t {
+    std::mutex mutex;
+    std::map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>, std::less<>> tokens;
+  };
+
+  csrf_tokens_t &csrf_tokens() {
+    static csrf_tokens_t instance;
+    return instance;
+  }
+
+  constexpr auto CSRF_TOKEN_LIFETIME = std::chrono::hours(1);
+
+  /**
+   * @brief Refuses a state-changing request sent by a page that is not the web UI (CSRF).
+   * @details The session cookies are SameSite=Strict, which already keeps them off cross-site
+   *          requests; this also covers same-site pages on another port or name. Allowed: no
+   *          `Origin`/`Referer` at all (not a browser page), the request's own `Host` (whatever
+   *          address the UI was opened by), `csrf_allowed_origins`, or a valid `X-CSRF-Token`.
+   * @return False after answering 403.
+   */
+  bool check_csrf(resp_https_t response, req_https_t request) {
+    auto origin = request_header(request, "origin");
+    if (origin.empty()) {
+      origin = request_header(request, "referer");
+    }
+    if (origin.empty() ||
+        web_auth::origin_allowed(origin, request_header(request, "host"), config::sunshine.csrf_allowed_origins)) {
+      return true;
+    }
+
+    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    if (const auto token = request_header(request, "x-csrf-token"); !token.empty()) {
+      auto &csrf = csrf_tokens();
+      std::scoped_lock lock {csrf.mutex};
+      const auto it = csrf.tokens.find(address);
+      if (it != csrf.tokens.end() && it->second.second > std::chrono::steady_clock::now() && it->second.first == token) {
+        return true;
+      }
+    }
+
+    BOOST_LOG(warning) << "Web UI: ["sv << address << "] -- "sv << request->method << ' ' << request->path
+                       << " refused: sent from "sv << origin << ", not from the web UI"sv;
+    nlohmann::json tree;
+    tree["status_code"] = static_cast<int>(SimpleWeb::StatusCode::client_error_forbidden);
+    tree["status"] = false;
+    tree["error"] = "Cross-origin request refused";
+    const SimpleWeb::CaseInsensitiveMultimap headers {
+      {"Content-Type", "application/json"},
+      {"X-Frame-Options", "DENY"},
+      {"Content-Security-Policy", "frame-ancestors 'none';"}
+    };
+    response->write(SimpleWeb::StatusCode::client_error_forbidden, tree.dump(), headers);
+    return false;
   }
 
   /**
@@ -1302,7 +1393,8 @@ namespace confighttp {
           else {
             http::save_user_creds(config::sunshine.credentials_file, newUsername, newPassword);
             http::reload_user_creds(config::sunshine.credentials_file);
-            sessionCookie.clear(); // force re-login
+            // New credentials end every login, including this one
+            web_sessions().revoke_all();
             output_tree["status"] = true;
           }
         } else {
@@ -1712,15 +1804,27 @@ namespace confighttp {
       nlohmann::json input_tree = nlohmann::json::parse(ss.str());
       std::string username = input_tree.value("username", "");
       std::string password = input_tree.value("password", "");
+      const bool remember_me = input_tree.value("remember_me", false);
       std::string hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string();
-      if (!boost::iequals(username, config::sunshine.username) || hash != config::sunshine.password)
+      const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+      if (!boost::iequals(username, config::sunshine.username) || hash != config::sunshine.password) {
+        BOOST_LOG(info) << "Web UI: ["sv << address << "] -- login failed"sv;
         return;
-      std::string sessionCookieRaw = crypto::rand_alphabet(64);
-      sessionCookie = util::hex(crypto::hash(sessionCookieRaw + config::sunshine.salt)).to_string();
-      cookie_creation_time = std::chrono::steady_clock::now();
-      const SimpleWeb::CaseInsensitiveMultimap headers {
-        { "Set-Cookie", "auth=" + sessionCookieRaw + "; Secure; SameSite=Strict; Max-Age=2592000; Path=/" }
-      };
+      }
+      const auto tokens = web_sessions().issue(
+        config::sunshine.username,
+        remember_me,
+        request_header(request, "user-agent"),
+        address,
+        config::sunshine.session_token_ttl,
+        remember_me ? config::sunshine.remember_me_refresh_token_ttl : web_auth::default_refresh_ttl
+      );
+      BOOST_LOG(info) << "Web UI: ["sv << address << "] -- logged in"sv << (remember_me ? " (remembered)"sv : ""sv);
+
+      SimpleWeb::CaseInsensitiveMultimap headers;
+      add_session_cookies(headers, tokens);
+      // Retire the cookie of the single-session login this replaced
+      headers.emplace("Set-Cookie", "auth=; Path=/; Secure; SameSite=Strict; Max-Age=0");
       response->write(headers);
       fg.disable();
     } catch (std::exception &e) {
@@ -1730,6 +1834,144 @@ namespace confighttp {
       fg.disable();
       return;
     }
+  }
+
+  /**
+   * @brief Trade the refresh cookie for a new pair of login cookies.
+   * @details What the web UI calls when an API request returns 401, before retrying it once.
+   *
+   * @api_examples{/api/auth/refresh| POST| null}
+   */
+  void refreshSession(resp_https_t response, req_https_t request) {
+    if (!checkIPOrigin(response, request)) {
+      return;
+    }
+    SimpleWeb::CaseInsensitiveMultimap headers {
+      {"X-Frame-Options", "DENY"},
+      {"Content-Security-Policy", "frame-ancestors 'none';"}
+    };
+    auto tokens = refresh_from_cookie(request);
+    if (!tokens) {
+      add_cleared_cookies(headers);
+      response->write(SimpleWeb::StatusCode::client_error_unauthorized, headers);
+      return;
+    }
+    add_session_cookies(headers, *tokens);
+    response->write(headers);
+  }
+
+  /**
+   * @brief End the requesting login and clear its cookies. Succeeds when there is nothing to end.
+   *
+   * @api_examples{/api/auth/logout| POST| null}
+   */
+  void logout(resp_https_t response, req_https_t request) {
+    if (!checkIPOrigin(response, request)) {
+      return;
+    }
+    web_sessions().revoke_tokens(
+      request_cookie(request, web_auth::session_cookie_name),
+      request_cookie(request, web_auth::refresh_cookie_name)
+    );
+    SimpleWeb::CaseInsensitiveMultimap headers {
+      {"X-Frame-Options", "DENY"},
+      {"Content-Security-Policy", "frame-ancestors 'none';"}
+    };
+    add_cleared_cookies(headers);
+    response->write(headers);
+  }
+
+  /**
+   * @brief List the web UI logins that are still valid.
+   *
+   * @api_examples{/api/auth/sessions| GET| null}
+   */
+  void getSessions(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    const auto current = web_sessions().validate(request_cookie(request, web_auth::session_cookie_name));
+    const auto to_unix = [](web_auth::clock_t::time_point tp) {
+      return std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch()).count();
+    };
+
+    nlohmann::json sessions = nlohmann::json::array();
+    for (const auto &session : web_sessions().list(current.value_or(""))) {
+      sessions.push_back({
+        {"id", session.id},
+        {"device", session.device},
+        {"address", session.address},
+        {"created_at", to_unix(session.created_at)},
+        {"last_seen", to_unix(session.last_seen)},
+        {"expires_at", to_unix(session.expires_at)},
+        {"remember_me", session.remember_me},
+        {"current", session.current},
+      });
+    }
+    nlohmann::json output_tree;
+    output_tree["status"] = true;
+    output_tree["sessions"] = std::move(sessions);
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief End one web UI login by id. Ending the requesting one also clears its cookies.
+   *
+   * @api_examples{/api/auth/sessions/{id}| DELETE| null}
+   */
+  void revokeSession(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    const std::string id = request->path_match[1];
+    const auto current = web_sessions().validate(request_cookie(request, web_auth::session_cookie_name));
+    if (!web_sessions().revoke(id)) {
+      not_found(response, request);
+      return;
+    }
+    BOOST_LOG(info) << "Web UI: ["sv << net::addr_to_normalized_string(request->remote_endpoint().address())
+                    << "] -- ended a web UI login"sv;
+
+    SimpleWeb::CaseInsensitiveMultimap headers {
+      {"Content-Type", "application/json"},
+      {"X-Frame-Options", "DENY"},
+      {"Content-Security-Policy", "frame-ancestors 'none';"}
+    };
+    if (current == id) {
+      add_cleared_cookies(headers);
+    }
+    response->write(nlohmann::json {{"status", true}}.dump(), headers);
+  }
+
+  /**
+   * @brief Issue a CSRF token for this client, for pages not served from the address they call.
+   * @details Readable only by same-origin pages (no CORS headers), and bound to the client's address.
+   *
+   * @api_examples{/api/csrf-token| GET| null}
+   */
+  void getCSRFToken(resp_https_t response, req_https_t request) {
+    if (!checkIPOrigin(response, request)) {
+      return;
+    }
+    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    const auto now = std::chrono::steady_clock::now();
+
+    auto &csrf = csrf_tokens();
+    std::string token;
+    {
+      std::scoped_lock lock {csrf.mutex};
+      std::erase_if(csrf.tokens, [&](const auto &entry) {
+        return entry.second.second <= now;
+      });
+      auto &slot = csrf.tokens[address];
+      if (slot.first.empty()) {
+        slot = {crypto::rand_alphabet(32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"sv), now + CSRF_TOKEN_LIFETIME};
+      }
+      token = slot.first;
+    }
+    nlohmann::json output_tree;
+    output_tree["csrf_token"] = token;
+    send_response(response, output_tree);
   }
 
   /**
@@ -1762,6 +2004,11 @@ namespace confighttp {
     server.resource["^/login/?$"]["GET"] = getLoginPage;
     server.resource["^/troubleshooting/?$"]["GET"] = getTroubleshootingPage;
     server.resource["^/api/login"]["POST"] = login;
+    server.resource["^/api/auth/refresh$"]["POST"] = refreshSession;
+    server.resource["^/api/auth/logout$"]["POST"] = logout;
+    server.resource["^/api/auth/sessions$"]["GET"] = getSessions;
+    server.resource["^/api/auth/sessions/([A-Za-z0-9]+)$"]["DELETE"] = revokeSession;
+    server.resource["^/api/csrf-token$"]["GET"] = getCSRFToken;
     server.resource["^/api/pin$"]["POST"] = savePin;
     server.resource["^/api/otp$"]["POST"] = getOTP;
     server.resource["^/api/apps$"]["GET"] = getApps;
@@ -1795,6 +2042,23 @@ namespace confighttp {
     server.resource["^/images/apollo.ico$"]["GET"] = getFaviconImage;
     server.resource["^/images/logo-apollo-45.png$"]["GET"] = getApolloLogoImage;
     server.resource["^/assets\\/.+$"]["GET"] = getNodeModules;
+
+    // Every state-changing route checks where the request comes from first, whatever its own
+    // authentication: a route added later is covered without thinking about it.
+    for (auto &[pattern, methods] : server.resource) {
+      for (auto &[method, handler] : methods) {
+        if (method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE") {
+          handler = [inner = handler](resp_https_t response, req_https_t request) {
+            if (check_csrf(response, request)) {
+              inner(std::move(response), std::move(request));
+            }
+          };
+        }
+      }
+    }
+
+    web_sessions().load();
+
     server.config.reuse_address = true;
     server.config.address = net::af_to_any_address_string(address_family);
     server.config.port = port_https;

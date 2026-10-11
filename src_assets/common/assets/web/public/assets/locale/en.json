@@ -211,6 +211,8 @@
     "controller": "Enable Gamepad Input",
     "controller_desc": "Allows guests to control the host system with a gamepad / controller",
     "credentials_file": "Credentials File",
+    "csrf_allowed_origins": "Extra Allowed Web UI Origins",
+    "csrf_allowed_origins_desc": "https:// origins (scheme and host, optionally a port) from which a page may change settings, besides the address the web UI is opened by, which is always allowed. Only needed behind a reverse proxy that serves the UI under another name. Example: [https://apollo.example.com]",
     "credentials_file_desc": "Store Username/Password separately from LavApollo's state file.",
     "dd_configuration_option": "Device configuration",
     "dd_config_ensure_active": "Activate the display automatically",
@@ -467,12 +469,16 @@
     "remote_monitor_desc": "Adds a \"Remote Monitor\" entry to the app list. Launching it from another device makes that device an extra monitor of this PC, with a virtual display of its own streamed beside the main session (which keeps running). The display is removed when that device disconnects. Needs the virtual display driver.",
     "remote_monitor_mute_audio": "Remote Monitor without audio",
     "remote_monitor_mute_audio_desc": "Remote Monitor sessions carry no sound, so only the main session plays the host's audio.",
+    "remember_me_refresh_token_ttl_seconds": "\"Remember me\" duration (seconds)",
+    "remember_me_refresh_token_ttl_seconds_desc": "How long a web UI login made with \"Remember me\" lasts before you must sign in again. Default: 604800 (7 days). Without \"Remember me\", a login lasts until the browser closes, 24 hours at most.",
     "rtss_allow_virtual_display_override": "Use this RTSS mode on virtual displays too",
     "rtss_allow_virtual_display_override_desc": "On virtual displays the limiter picks NVIDIA Reflex by itself when frame generation needs it. Enable to always use the mode above instead.",
     "rtss_frame_limit_type": "RTSS limiter mode",
     "rtss_frame_limit_type_desc": "How RTSS waits between frames. Async is the default; front edge sync favours smoothness, back edge sync favours latency, NVIDIA Reflex needs a game that supports it.",
     "rtss_install_path": "RTSS install folder",
     "rtss_install_path_desc": "Leave empty for the default install location. LavApollo starts RTSS when a stream begins if it is not already running.",
+    "session_token_ttl_seconds": "Web UI session refresh interval (seconds)",
+    "session_token_ttl_seconds_desc": "How long a web UI session token is valid before the browser silently trades it for a new one. Shorter limits what a stolen cookie is worth. Default: 7200 (2 hours).",
     "sunshine_name": "Server Name",
     "sunshine_name_desc": "The name displayed by Moonlight. If not specified, the PC's hostname is used",
     "sw_preset": "SW Presets",
@@ -520,7 +526,8 @@
     "wan_encryption_mode_desc": "This determines when encryption will be used when streaming over the Internet. Encryption can reduce streaming performance, particularly on less powerful hosts and clients."
   },
   "login": {
-    "save_password": "Remember Password"
+    "remember_me": "Remember me",
+    "remember_me_desc": "Stay signed in on this browser for a week. Without it, closing the browser signs you out."
   },
   "index": {
     "check_for_update": "Check for updates",
@@ -547,6 +554,7 @@
     "applications": "Applications",
     "configuration": "Configuration",
     "home": "Home",
+    "logout": "Sign Out",
     "password": "Change Password",
     "pin": "PIN",
     "theme_auto": "Auto",
@@ -561,7 +569,15 @@
     "new_creds": "New Credentials",
     "new_username_desc": "If not specified, the username will not change",
     "password_change": "Password Change",
-    "success_msg": "Password has been changed successfully! This page will reload soon, your browser will ask you for the new credentials."
+    "session_current": "This browser",
+    "session_expires": "signs out",
+    "session_last_seen": "last active",
+    "session_remembered": "Remembered",
+    "session_revoke": "Sign out",
+    "sessions_desc": "Browsers signed in to this web UI. Changing the password signs them all out.",
+    "sessions_empty": "No browser is signed in.",
+    "sessions_title": "Signed-in Browsers",
+    "success_msg": "Password has been changed successfully! Every browser has been signed out; this page will reload soon and ask you for the new credentials."
   },
   "permissions": {
     "input_controller": "Controller Input",

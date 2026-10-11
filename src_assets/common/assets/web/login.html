@@ -27,8 +27,9 @@
               v-model="passwordData.password" required />
           </div>
           <div class="mb-3 form-check">
-            <label for="savePassword" class="form-check-label">{{ $t('login.save_password') }}</label>
-            <input type="checkbox" class="form-check-input" id="savePassword" v-model="savePassword"/>
+            <label for="rememberMe" class="form-check-label">{{ $t('login.remember_me') }}</label>
+            <input type="checkbox" class="form-check-input" id="rememberMe" v-model="rememberMe"/>
+            <div class="form-text">{{ $t('login.remember_me_desc') }}</div>
           </div>
           <button type="submit" class="btn btn-primary w-100 mb-2" v-bind:disabled="loading">
             {{ $t('welcome.login') }}
@@ -55,55 +56,37 @@
       const error = ref('');
       const success = ref(false);
       const loading = ref(false);
-      const savePassword = ref(false);
+      const rememberMe = ref(false);
 
-      const data = {
+      // Earlier versions kept the password itself in localStorage for "Remember Password".
+      // "Remember me" keeps a revocable login on the server instead: drop what was stored.
+      localStorage.removeItem('login')
+
+      return {
         error,
         success,
         loading,
-        savePassword,
+        rememberMe,
         passwordData: {
           username: '',
           password: ''
         }
       }
-
-      const savedPasswordStr = localStorage.getItem('login')
-      if (savedPasswordStr) {
-        try {
-          const { username, password } = JSON.parse(savedPasswordStr);
-          savePassword.value = true;
-          data.passwordData = {
-            username,
-            password
-          }
-        } catch (e) {
-          console.error('Reading saved password failed!', e);
-        }
-      }
-
-      return data
     },
     methods: {
       login() {
         this.error = null;
         this.loading = true;
-        if (!this.savePassword) {
-          localStorage.removeItem('login')
-        }
         fetch("./api/login", {
           headers: {
             'Content-Type': 'application/json'
           },
           method: 'POST',
-          body: JSON.stringify(this.passwordData),
+          body: JSON.stringify({ ...this.passwordData, remember_me: this.rememberMe }),
         }).then((res) => {
           this.loading = false;
           if (res.status === 200) {
             this.success = true;
-            if (this.savePassword) {
-              localStorage.setItem('login', JSON.stringify(this.passwordData));
-            }
             const url = new URL(window.location);
             const redirectUrl = url.searchParams.get('redir');
             const hash = url.hash;

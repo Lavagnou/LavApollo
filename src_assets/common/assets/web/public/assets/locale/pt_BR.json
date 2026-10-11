@@ -426,7 +426,7 @@
     "wan_encryption_mode_desc": "Isso determina quando a criptografia será usada durante a transmissão pela Internet. A criptografia pode reduzir o desempenho da transmissão, principalmente em servidores e clientes menos potentes."
   },
   "login": {
-    "save_password": "Lembrar senha"
+    "remember_me": "Lembrar de mim"
   },
   "index": {
     "description": "O Apollo é um servidor de transmissão de jogos auto-hospedado para o Moonlight.",
