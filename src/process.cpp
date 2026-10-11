@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iomanip>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -76,6 +77,7 @@ namespace proc {
 
   int input_only_app_id = -1;
   std::string input_only_app_id_str;
+  int remote_monitor_app_id = -1;
   int terminate_app_id = -1;
   std::string terminate_app_id_str;
 
@@ -95,6 +97,86 @@ namespace proc {
         return;
       }
     }
+  }
+#endif
+
+#ifdef _WIN32
+  namespace {
+    std::mutex remote_monitor_mutex;
+    // GDI device name -> the GUID it was created with
+    std::map<std::string, GUID> remote_monitor_displays;
+  }  // namespace
+
+  std::string create_remote_monitor_display(const rtsp_stream::launch_session_t &session) {
+    if (vDisplayDriverStatus != VDISPLAY::DRIVER_STATUS::OK) {
+      initVDisplayDriver();
+    }
+    if (vDisplayDriverStatus != VDISPLAY::DRIVER_STATUS::OK) {
+      BOOST_LOG(warning) << "Remote Monitor: the virtual display driver is not available"sv;
+      return {};
+    }
+
+    // Not the client's own UUID: that is the GUID of its game display, which it may be
+    // streaming at the same time from elsewhere. Stable per client all the same.
+    std::string client_id = session.unique_id;  // parse() takes a mutable string
+    auto uuid = uuid_util::uuid_t::parse(client_id);
+    uuid.b64[0] ^= 0x524F54494E4F4D52ULL;  // "RMONITOR"
+    GUID guid;
+    memcpy(&guid, &uuid, sizeof(GUID));
+
+    std::lock_guard lock {remote_monitor_mutex};
+    for (auto it = remote_monitor_displays.begin(); it != remote_monitor_displays.end(); ++it) {
+      if (memcmp(&it->second, &guid, sizeof(GUID)) == 0) {
+        // The same client again (a reconnect): its display may still be there
+        if (VDISPLAY::isDisplayAttached(platf::from_utf8(it->first))) {
+          return it->first;
+        }
+        remote_monitor_displays.erase(it);
+        break;
+      }
+    }
+
+    // A display left by a previous run would make the driver refuse this GUID
+    VDISPLAY::removeVirtualDisplay(guid);
+    VDISPLAY::applyRenderAdapterPreference(platf::from_utf8(config::video.adapter_name));
+
+    int fps = session.fps ? session.fps : 60000;
+    if (fps < 1000) {
+      fps *= 1000;
+    }
+    const uint32_t width = session.width ? session.width : 1920;
+    const uint32_t height = session.height ? session.height : 1080;
+
+    // Driver names and serials stop at 13 characters
+    auto label = session.device_name.empty() ? std::string {"Monitor"} : session.device_name;
+    if (label.size() > 13) {
+      label.resize(13);
+    }
+    const auto serial = uuid.string();
+
+    const auto device_name = VDISPLAY::createVirtualDisplay(serial.c_str(), label.c_str(), width, height, fps, guid);
+    if (device_name.empty()) {
+      return {};
+    }
+    VDISPLAY::changeDisplaySettings(device_name.c_str(), width, height, fps);
+
+    auto name = platf::to_utf8(device_name);
+    remote_monitor_displays[name] = guid;
+    BOOST_LOG(info) << "Remote Monitor: " << session.device_name << " gets its own display " << name
+                    << " [" << width << 'x' << height << ']';
+    return name;
+  }
+
+  void release_remote_monitor_display(const std::string &device_name) {
+    std::lock_guard lock {remote_monitor_mutex};
+    auto it = remote_monitor_displays.find(device_name);
+    if (it == remote_monitor_displays.end()) {
+      return;
+    }
+    if (VDISPLAY::removeVirtualDisplay(it->second)) {
+      BOOST_LOG(info) << "Remote Monitor: removed display " << device_name;
+    }
+    remote_monitor_displays.erase(it);
   }
 #endif
 
@@ -1790,6 +1872,41 @@ namespace proc {
 
         apps.emplace_back(std::move(ctx));
       }
+
+#ifdef _WIN32
+      // Remote Monitor entry: this client becomes another monitor of the host
+      if (config::video.remote_monitor) {
+        proc::ctx_t ctx;
+        ctx.idx = std::to_string(i);
+        ctx.uuid = REMOTE_MONITOR_UUID;
+        ctx.name = "Remote Monitor";
+        ctx.image_path = parse_env_val(this_env, "virtual_desktop.png");
+        ctx.virtual_display = false;
+        ctx.scale_factor = 100;
+        ctx.use_app_identity = false;
+        ctx.per_client_app_identity = false;
+        ctx.allow_client_commands = false;
+        ctx.terminate_on_pause = false;
+
+        ctx.elevated = false;
+        ctx.auto_detach = true;
+        ctx.wait_all = true;
+        ctx.exit_timeout = 5s;
+
+        auto possible_ids = calculate_app_id(ctx.name, ctx.image_path, i++);
+        if (ids.count(std::get<0>(possible_ids)) == 0) {
+          ctx.id = std::get<0>(possible_ids);
+        }
+        else {
+          ctx.id = std::get<1>(possible_ids);
+        }
+        ids.insert(ctx.id);
+
+        remote_monitor_app_id = util::from_view(ctx.id);
+
+        apps.emplace_back(std::move(ctx));
+      }
+#endif
 
       // Terminate entry
       {

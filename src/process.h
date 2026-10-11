@@ -39,6 +39,7 @@
 #define FALLBACK_DESKTOP_UUID "EAAC6159-089A-46A9-9E24-6436885F6610"
 #define REMOTE_INPUT_UUID "8CB5C136-DA67-4F99-B4A1-F9CD35005CF4"
 #define TERMINATE_APP_UUID "E16CBE1B-295D-4632-9A76-EC4180C857D3"
+#define REMOTE_MONITOR_UUID "5B8B5BB5-2A6D-4C4E-9E41-3F8C0D6E7A11"
 
 namespace proc {
   using file_t = util::safe_ptr_v2<FILE, int, fclose>;
@@ -213,6 +214,23 @@ namespace proc {
 
   extern int input_only_app_id;
   extern std::string input_only_app_id_str;
+  extern int remote_monitor_app_id;
+
+#ifdef _WIN32
+  /**
+   * @brief Create the virtual display a Remote Monitor client streams on its own.
+   *
+   * One per client, with a GUID derived from (but not equal to) the client's identity, so a
+   * reconnecting client gets the same monitor back and Windows remembers where it was put.
+   * @return Its GDI device name, or empty if the driver could not create it.
+   */
+  std::string create_remote_monitor_display(const rtsp_stream::launch_session_t &session);
+
+  /**
+   * @brief Remove a display created by create_remote_monitor_display(), when its session ends.
+   */
+  void release_remote_monitor_display(const std::string &device_name);
+#endif
   extern int terminate_app_id;
   extern std::string terminate_app_id_str;
 }  // namespace proc

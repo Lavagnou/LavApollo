@@ -186,6 +186,25 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
   - Not ported: Vibepollo's ETW present-time stamping (`present_timing`), which moves WGC timestamps to
     the game's Present cadence. The 1000 Hz display gets most of that benefit.
 
+- **Remote Monitor** (`config.remote_monitor`, default on; after Vibepollo). An app-list entry next to
+  "Remote Input": launched from another device, it gives that device **a SudoVDA display of its own**,
+  captured and encoded on its own, while the main session goes on. Several clients streaming at once
+  were already possible, but they all shared the one capture of `proc::proc`'s display.
+  - The display is created in `proc::create_remote_monitor_display()` (GUID = client UUID xor a
+    constant: stable per client, distinct from its game display), passed as
+    `launch_session_t::capture_output` → `video::config_t::capture_output`, and removed by
+    `release_remote_monitor_display()` when the session ends (`stream.cpp` `join()`).
+  - ⚠️ **A non-empty `capture_output` takes the session off the shared capture thread**:
+    `capture_async()` starts a capture thread of its own (`start_capture_async`/`end_capture_async`
+    on a local context), and `captureThread()` opens exactly that display -- no fallback to another
+    display, never reads or writes `proc::proc`'s display name, and ignores `switch_display` /
+    `recapture_display`, which belong to the main session. `capture()` always goes async for it.
+  - It does not touch the running app, the layout or the primary display; Windows places the new
+    display, and a main session's composite rebuilds once through `topology_changed()`.
+  - Each such session runs its own encoder: GPU encode sessions are the practical limit.
+  - `remote_monitor_mute_audio` leaves its audio out (`config.audio.input_only`).
+  - Vibepollo's "Remote Input" is LavApollo's existing input-only mode; nothing to port there.
+
 - **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
   previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
   IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in

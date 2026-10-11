@@ -89,6 +89,11 @@ namespace rtsp_stream {
     bool client_vrr_requested = false;
     uint32_t scale_factor;
 
+    // Remote Monitor: the display this session captures on its own (see video::config_t), and
+    // whether to leave its audio out.
+    std::string capture_output;
+    bool mute_audio = false;
+
     std::optional<crypto::cipher::gcm_t> rtsp_cipher;
     std::string rtsp_url_scheme;
     uint32_t rtsp_iv_counter;

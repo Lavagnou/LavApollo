@@ -1049,6 +1049,7 @@ namespace rtsp_stream {
 
       config.monitor.input_only = session.input_only;
       config.monitor.vrr_low_latency = session.client_vrr_requested;
+      config.monitor.capture_output = session.capture_output;
       if (session.client_vrr_requested) {
         BOOST_LOG(info) << "Client paces playback from RTP timestamps (VRR)"sv;
       }
@@ -1116,7 +1117,7 @@ namespace rtsp_stream {
       config.audio.flags[audio::config_t::CUSTOM_SURROUND_PARAMS] = valid;
     }
 
-    config.audio.input_only = session.input_only;
+    config.audio.input_only = session.input_only || session.mute_audio;
 
     const bool pyrowave_session = config.monitor.videoFormat == pyrowave::protocol::BITSTREAM_FORMAT;
     if (pyrowave_session) {

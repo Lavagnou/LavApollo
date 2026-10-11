@@ -1742,6 +1742,52 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
 </table>
 
+### remote_monitor
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Adds a "Remote Monitor" entry to the app list. Launching it from another device makes that device an extra monitor of this PC, with a virtual display of its own streamed beside the main session (which keeps running). The display is removed when that device disconnects. Needs the virtual display driver.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            remote_monitor = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### remote_monitor_mute_audio
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Remote Monitor sessions carry no sound, so only the main session plays the host's audio.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            remote_monitor_mute_audio = disabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### frame_limiter_enable
 
 <table>

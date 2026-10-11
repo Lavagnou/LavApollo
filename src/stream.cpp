@@ -2413,6 +2413,11 @@ namespace stream {
       if (!session.config.monitor.input_only && --frame_limiter_sessions == 0) {
         platf::frame_limiter_streaming_stop(platf::frame_limiter_owner::rtsp);
       }
+
+      // A Remote Monitor's display lives exactly as long as its session
+      if (!session.config.monitor.capture_output.empty()) {
+        proc::release_remote_monitor_display(session.config.monitor.capture_output);
+      }
 #endif
 
       // If this is the last session, invoke the platform callbacks

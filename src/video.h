@@ -57,6 +57,10 @@ namespace video {
 
     // The client paces playback from RTP timestamps (VRR): keep capture queues minimal.
     bool vrr_low_latency = false;
+
+    // Remote Monitor: capture exactly this display, on a capture thread of the session's own,
+    // instead of the shared one following proc::proc's display. Empty for every other session.
+    std::string capture_output;
   };
 
   platf::mem_type_e map_base_dev_type(AVHWDeviceType type);

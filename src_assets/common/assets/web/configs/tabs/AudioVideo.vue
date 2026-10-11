@@ -171,6 +171,22 @@ const validateFallbackMode = (event) => {
               v-if="platform === 'windows'"
     ></Checkbox>
 
+    <!-- Remote Monitor -->
+    <Checkbox class="mb-3"
+              id="remote_monitor"
+              locale-prefix="config"
+              v-model="config.remote_monitor"
+              default="true"
+              v-if="platform === 'windows'"
+    ></Checkbox>
+    <Checkbox class="mb-3"
+              id="remote_monitor_mute_audio"
+              locale-prefix="config"
+              v-model="config.remote_monitor_mute_audio"
+              default="false"
+              v-if="platform === 'windows' && config.remote_monitor !== 'disabled'"
+    ></Checkbox>
+
     <!-- Frame Limiter -->
     <FrameLimiter :config="config" v-if="platform === 'windows'" />
 

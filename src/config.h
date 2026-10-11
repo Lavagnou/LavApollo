@@ -25,6 +25,8 @@ namespace config {
     bool limit_framerate;
     bool double_refreshrate;
     bool vrr_virtual_display_refresh;  ///< 1000 Hz virtual displays for clients that request VRR pacing
+    bool remote_monitor;  ///< Offer the "Remote Monitor" entry: a client becomes another monitor of the host
+    bool remote_monitor_mute_audio;  ///< Remote Monitor sessions carry no audio
     // ffmpeg params
     int qp;  // higher == more compression and less quality
 

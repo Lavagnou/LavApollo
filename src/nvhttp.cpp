@@ -1325,6 +1325,7 @@ namespace nvhttp {
           if (
             appid != current_appid
             && appid != proc::input_only_app_id
+            && appid != proc::remote_monitor_app_id
             && appid != proc::terminate_app_id
           ) {
             continue;
@@ -1390,6 +1391,8 @@ namespace nvhttp {
     auto current_appid = proc::proc.running();
     auto current_app_uuid = proc::proc.get_running_app_uuid();
     bool is_input_only = config::input.enable_input_only_mode && (appid == proc::input_only_app_id || (appuuid_str == REMOTE_INPUT_UUID));
+    // Another device joining as an extra monitor of the host, beside whatever else streams
+    bool is_remote_monitor = config::video.remote_monitor && (appid == proc::remote_monitor_app_id || appuuid_str == REMOTE_MONITOR_UUID);
 
     auto named_cert_p = get_verified_cert(request);
     auto perm = PERM::launch;
@@ -1428,7 +1431,7 @@ namespace nvhttp {
       return;
     }
 
-    if (!is_input_only) {
+    if (!is_input_only && !is_remote_monitor) {
       // Special handling for the "terminate" app
       if (
         (config::input.enable_input_only_mode && appid == proc::terminate_app_id)
@@ -1475,7 +1478,24 @@ namespace nvhttp {
 
     bool no_active_sessions = rtsp_stream::session_count() == 0;
 
-    if (is_input_only) {
+    if (is_remote_monitor) {
+#ifdef _WIN32
+      BOOST_LOG(info) << "Launching Remote Monitor session for "sv << launch_session->device_name;
+
+      launch_session->client_do_cmds.clear();
+      launch_session->client_undo_cmds.clear();
+
+      launch_session->capture_output = proc::create_remote_monitor_display(*launch_session);
+      if (launch_session->capture_output.empty()) {
+        tree.put("root.resume", 0);
+        tree.put("root.<xmlattr>.status_code", 503);
+        tree.put("root.<xmlattr>.status_message", "Could not create a virtual display for this monitor");
+        tree.put("root.gamesession", 0);
+        return;
+      }
+      launch_session->mute_audio = config::video.remote_monitor_mute_audio;
+#endif
+    } else if (is_input_only) {
       BOOST_LOG(info) << "Launching input only session..."sv;
 
       launch_session->client_do_cmds.clear();

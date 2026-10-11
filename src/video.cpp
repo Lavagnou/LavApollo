@@ -1188,8 +1188,21 @@ namespace video {
     std::vector<std::string> display_names;
     int display_p = -1;
     std::shared_ptr<platf::display_t> disp;
-    const auto initial_display = proc::proc.get_display_name();
-    if (!initial_display.empty()) {
+
+    // A Remote Monitor session owns this thread and one display. It never falls back to
+    // another display, never follows or rewrites proc::proc's display, and leaves the
+    // display-switch and recapture events to the main session's thread.
+    const std::string fixed_output = capture_ctxs.front().config.capture_output;
+    if (!fixed_output.empty()) {
+      disp = platf::display(encoder.platform_formats->dev_type, fixed_output, capture_ctxs.front().config);
+      if (!disp) {
+        BOOST_LOG(error) << "Remote Monitor: could not capture ["sv << fixed_output << ']';
+        return;
+      }
+    }
+
+    const auto initial_display = fixed_output.empty() ? proc::proc.get_display_name() : std::string {};
+    if (!disp && !initial_display.empty()) {
       disp = platf::display(encoder.platform_formats->dev_type, initial_display, capture_ctxs.front().config);
     }
     if (!disp) {
@@ -1340,7 +1353,7 @@ namespace video {
           capture_ctxs.emplace_back(std::move(*capture_ctx_queue->pop()));
         }
 
-        if (switch_display_event->peek() || recapture_display_event->peek()) {
+        if (fixed_output.empty() && (switch_display_event->peek() || recapture_display_event->peek())) {
           artificial_reinit = true;
           return false;
         }
@@ -1392,6 +1405,21 @@ namespace video {
 
             // Consumed here rather than when raised: the reopen below reads proc's display
             // name afresh, which is all a recapture request asks for.
+            if (!fixed_output.empty()) {
+              // Its own display or nothing: a mode change passes within the retries, a
+              // removed display ends the session.
+              disp.reset();
+              for (int attempt = 0; attempt < 5 && capture_ctx_queue->running() && !disp; attempt++) {
+                reset_display(disp, encoder.platform_formats->dev_type, fixed_output, capture_ctxs.front().config);
+              }
+              if (!disp) {
+                return;
+              }
+              display_wp = disp;
+              reinit_event.reset();
+              continue;
+            }
+
             while (recapture_display_event->peek()) {
               recapture_display_event->pop();
             }
@@ -2597,10 +2625,31 @@ namespace video {
       shutdown_event->raise(true);
     });
 
-    auto ref = capture_thread_async.ref();
-    if (!ref) {
-      return;
+    // Every session shares one capture thread, which follows proc::proc's display -- except
+    // a Remote Monitor session, which captures a display of its own on a thread of its own
+    // (after Vibepollo): sharing would hand it the main session's picture.
+    std::optional<capture_thread_async_ctx_t> own_capture;
+    decltype(capture_thread_async.ref()) shared_capture;
+    capture_thread_async_ctx_t *ref;
+    if (!config.capture_output.empty()) {
+      own_capture.emplace();
+      if (start_capture_async(*own_capture)) {
+        return;
+      }
+      ref = &*own_capture;
+    } else {
+      shared_capture = capture_thread_async.ref();
+      if (!shared_capture) {
+        return;
+      }
+      ref = shared_capture.get();
     }
+    // Declared after `lg`, so it runs first: the capture thread is joined before the images stop.
+    auto end_own_capture = util::fail_guard([&]() {
+      if (own_capture) {
+        end_capture_async(*own_capture);
+      }
+    });
 
     ref->capture_ctx_queue->raise(capture_ctx_t {images, config});
 
@@ -2693,7 +2742,8 @@ namespace video {
     idr_events->raise(true);
     // PyroWave sessions always take the async path: encode_run_pyrowave() does not use
     // the probed encoder, only the images the capture thread delivers.
-    if ((chosen_encoder->flags & PARALLEL_ENCODING) || config.videoFormat == pyrowave::protocol::BITSTREAM_FORMAT) {
+    if ((chosen_encoder->flags & PARALLEL_ENCODING) || config.videoFormat == pyrowave::protocol::BITSTREAM_FORMAT ||
+        !config.capture_output.empty()) {
       capture_async(std::move(mail), config, channel_data);
     } else {
       safe::signal_t join_event;
