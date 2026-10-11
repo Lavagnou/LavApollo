@@ -17,13 +17,16 @@ set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}")
 set(CPACK_STRIP_FILES YES)
 
 # install common assets
+# The web UIs' sources (web/, web-v2/ with its node_modules) are not assets: their builds are,
+# installed from assets/web below.
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/common/assets/"
         DESTINATION "${SUNSHINE_ASSETS_DIR}"
-        PATTERN "web" EXCLUDE)
+        PATTERN "web" EXCLUDE
+        PATTERN "web-v2" EXCLUDE)
 # copy assets to build directory, for running without install
 file(GLOB_RECURSE ALL_ASSETS
         RELATIVE "${SUNSHINE_SOURCE_ASSETS_DIR}/common/assets/" "${SUNSHINE_SOURCE_ASSETS_DIR}/common/assets/*")
-list(FILTER ALL_ASSETS EXCLUDE REGEX "^web/.*$")  # Filter out the web directory
+list(FILTER ALL_ASSETS EXCLUDE REGEX "^web(-v2)?/.*$")  # Filter out the web UI sources
 foreach(asset ${ALL_ASSETS})  # Copy assets to build directory, excluding the web directory
     file(COPY "${SUNSHINE_SOURCE_ASSETS_DIR}/common/assets/${asset}"
             DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/assets")

@@ -118,6 +118,10 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
   - **Build**: the `web-ui` target builds it **after** the current UI. The current UI's build empties
     `assets/web`; this one only empties `assets/web/v2`. The output goes to `SUNSHINE_WEB_OUTPUT_DIR`.
     Packaging already ships all of `assets/web`.
+    ⚠️ **`cmake/packaging/common.cmake` installs `src_assets/common/assets/` minus `web` *and*
+    `web-v2`.** Without the second exclusion the v2 sources and their `node_modules` (82 MB, `.exe`
+    files included) went into the installer, and NSIS failed on the CI (release v2.0.0). Any new
+    source folder there needs the same exclusion, in the `install()` and in the build-dir copy.
   - **Serving**: `getWebV2()` serves `^/v2(/.*)?$` without authentication, like the current UI's
     `/assets`; every API call still authenticates. A path that is not a file returns `index.html` (SPA
     routes), except under `assets/` and `images/`. Hashed bundles are cached as immutable;
