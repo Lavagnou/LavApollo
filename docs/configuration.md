@@ -473,7 +473,7 @@ Please note that pause command will not be executed when the session terminates.
             @endcode</td>
     </tr>
     <tr>
-        <td rowspan="6">Choices</td>
+        <td rowspan="11">Choices</td>
         <td>ds4</td>
         <td>DualShock 4 controller (PS4)
             @note{This option applies to Windows only.}</td>
@@ -497,6 +497,40 @@ Please note that pause command will not be executed when the session terminates.
         <td>xone</td>
         <td>Xbox One controller
             @note{This option applies to Linux only.}</td>
+    </tr>
+    <tr>
+        <td>vhf</td>
+        <td>VHF virtual gamepad driver, presenting the controller that matches the client's
+            (DualSense for a PlayStation pad or when motion/touchpad emulation applies, Switch Pro
+            for a Nintendo pad, Xbox otherwise). With `auto`, this driver is also used when
+            ViGEmBus is not installed.
+            @note{This option applies to Windows only, and needs the VHF gamepad driver bundled
+            with the installer.}</td>
+    </tr>
+    <tr>
+        <td>vhf_xbox</td>
+        <td>VHF virtual gamepad driver, as an Xbox Series controller
+            @note{This option applies to Windows only.}</td>
+    </tr>
+    <tr>
+        <td>vhf_xbox_one</td>
+        <td>VHF virtual gamepad driver, as an Xbox One controller
+            @note{This option applies to Windows only.}</td>
+    </tr>
+    <tr>
+        <td>vhf_ds4</td>
+        <td>VHF virtual gamepad driver, as a DualShock 4 controller (PS4)
+            @note{This option applies to Windows only.}</td>
+    </tr>
+    <tr>
+        <td>vhf_ds5</td>
+        <td>VHF virtual gamepad driver, as a DualSense controller (PS5)
+            @note{This option applies to Windows only.}</td>
+    </tr>
+    <tr>
+        <td>vhf_switch</td>
+        <td>VHF virtual gamepad driver, as a Switch Pro controller
+            @note{This option applies to Windows only.}</td>
     </tr>
 </table>
 

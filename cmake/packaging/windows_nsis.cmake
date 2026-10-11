@@ -14,6 +14,10 @@ SET(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
         nsExec::ExecToLog 'icacls \\\"$INSTDIR\\\" /reset'
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\update-path.bat\\\" add'
         nsExec::ExecToLog '\\\"$INSTDIR\\\\drivers\\\\sudovda\\\\install.bat\\\"'
+        IfFileExists '$INSTDIR\\\\drivers\\\\vhf-gamepad\\\\install.ps1' 0 NoVhfGamepadInstall
+            nsExec::ExecToLog \
+              'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\\"$INSTDIR\\\\drivers\\\\vhf-gamepad\\\\install.ps1\\\"'
+        NoVhfGamepadInstall:
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\migrate-config.bat\\\"'
         nsExec::ExecToLog '\\\"$INSTDIR\\\\scripts\\\\add-firewall-rule.bat\\\"'
         nsExec::ExecToLog \
@@ -38,6 +42,14 @@ set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
                 \\\"$INSTDIR\\\\scripts\\\\uninstall-gamepad.ps1\\\"'; \
               skipped if no
         NoGamepad:
+        IfFileExists '$INSTDIR\\\\drivers\\\\vhf-gamepad\\\\install.ps1' 0 NoVhfGamepad
+        MessageBox MB_YESNO|MB_ICONQUESTION \
+            'Do you want to remove the VHF Virtual Gamepad driver?' \
+            /SD IDNO IDNO NoVhfGamepad
+            nsExec::ExecToLog \
+              'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+                \\\"$INSTDIR\\\\drivers\\\\vhf-gamepad\\\\install.ps1\\\" -Uninstall -RemoveDriverStorePackage'
+        NoVhfGamepad:
         MessageBox MB_YESNO|MB_ICONQUESTION \
             'Do you want to remove SudoVDA Virtual Display Driver?' \
             /SD IDNO IDNO NoSudoVDA

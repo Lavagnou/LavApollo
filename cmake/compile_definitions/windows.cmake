@@ -33,6 +33,15 @@ file(GLOB NVPREFS_FILES CONFIGURE_DEPENDS
 # vigem
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/third-party/ViGEmClient/include")
 
+# libvirtualgamepad (Nonary, MIT): the control-protocol client for the VHF virtual gamepad driver.
+# Only its header-only protocol and small SetupAPI client are compiled; the driver itself is a
+# separately released package, signed in CI (see docs/vhf-gamepad.md).
+set(LAVAPOLLO_LIBVIRTUALGAMEPAD_DIR "${CMAKE_SOURCE_DIR}/third-party/libvirtualgamepad")
+if(NOT EXISTS "${LAVAPOLLO_LIBVIRTUALGAMEPAD_DIR}/include/libvirtualgamepad/protocol.h")
+    message(FATAL_ERROR "libvirtualgamepad not found: run git submodule update --init third-party/libvirtualgamepad")
+endif()
+include_directories(SYSTEM "${LAVAPOLLO_LIBVIRTUALGAMEPAD_DIR}/include")
+
 # apollo icon
 if(NOT DEFINED PROJECT_ICON_PATH)
     set(PROJECT_ICON_PATH "${CMAKE_SOURCE_DIR}/apollo.ico")
@@ -82,6 +91,13 @@ set(PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/windows/ipc/process_handler.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/vhf_gamepad.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/vhf_gamepad.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/vhf_gamepad_policy.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/vhf_gamepad_policy.cpp"
+        "${LAVAPOLLO_LIBVIRTUALGAMEPAD_DIR}/client/client.cpp"
+        "${LAVAPOLLO_LIBVIRTUALGAMEPAD_DIR}/include/libvirtualgamepad/client.h"
+        "${LAVAPOLLO_LIBVIRTUALGAMEPAD_DIR}/include/libvirtualgamepad/protocol.h"
         "${CMAKE_SOURCE_DIR}/third-party/sudovda/sudovda-ioctl.h"
         "${CMAKE_SOURCE_DIR}/third-party/sudovda/sudovda.h"
         "${CMAKE_SOURCE_DIR}/third-party/ViGEmClient/src/ViGEmClient.cpp"

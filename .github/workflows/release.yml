@@ -90,6 +90,28 @@ jobs:
             mingw-w64-ucrt-x86_64-opus
             mingw-w64-ucrt-x86_64-toolchain
 
+      # The VHF virtual gamepad driver ships only signed by LavApollo's certificate
+      # (docs/vhf-gamepad.md). Without the secrets the release still builds, without that driver.
+      - name: Prepare signed VHF gamepad driver
+        shell: pwsh
+        env:
+          VHF_SIGNING_CERT_BASE64: ${{ secrets.VHF_SIGNING_CERT_BASE64 }}
+          VHF_SIGNING_CERT_PASSWORD: ${{ secrets.VHF_SIGNING_CERT_PASSWORD }}
+        run: |
+          if (-not $env:VHF_SIGNING_CERT_BASE64 -or -not $env:VHF_SIGNING_CERT_PASSWORD) {
+            "::warning::VHF_SIGNING_CERT_BASE64 / VHF_SIGNING_CERT_PASSWORD are not set: this release ships without the VHF virtual gamepad driver."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'vhf-signing.pfx'
+          $out = Join-Path $env:RUNNER_TEMP 'vhf-gamepad'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:VHF_SIGNING_CERT_BASE64))
+          try {
+            ./scripts/prepare-vhf-gamepad.ps1 -OutDir $out -PfxPath $pfx
+          } finally {
+            Remove-Item -LiteralPath $pfx -Force
+          }
+          "VHF_GAMEPAD_PACKAGE_DIR=$($out -replace '\\', '/')" >> $env:GITHUB_ENV
+
       - name: Configure
         shell: msys2 {0}
         env:
@@ -97,7 +119,7 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           BUILD_VERSION: ${{ steps.version.outputs.tag }}
           COMMIT: ${{ github.sha }}
-        run: cmake -B build -G Ninja -S .
+        run: cmake -B build -G Ninja -S . -DLAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR="${VHF_GAMEPAD_PACKAGE_DIR:-}"
 
       - name: Build
         shell: msys2 {0}

@@ -32,6 +32,34 @@ install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"
         DESTINATION "drivers"
         COMPONENT sudovda)
 
+# VHF virtual gamepad driver (Nonary's libvirtualgamepad). Bundled only when the release workflow
+# prepared a package signed with LavApollo's certificate (scripts/prepare-vhf-gamepad.ps1): without
+# the signing secrets, LavApollo ships without it and ViGEmBus remains the only gamepad driver.
+set(LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR "" CACHE PATH
+    "Signed VHF gamepad driver package, as produced by scripts/prepare-vhf-gamepad.ps1")
+if(LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR)
+    foreach(_vhf_file IN ITEMS
+            driver/VibeshineVhfGamepad.inf
+            driver/VibeshineVhfGamepad.dll
+            driver/VibeshineVhfGamepad.cat
+            driver/LavApolloVhfGamepad.cer
+            tools/VibeshineVhfGamepadDeviceSetup.exe)
+        if(NOT EXISTS "${LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR}/${_vhf_file}")
+            message(FATAL_ERROR "VHF gamepad package is missing ${_vhf_file}: "
+                                "${LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR}")
+        endif()
+    endforeach()
+    unset(_vhf_file)
+    message(STATUS "Bundling the VHF gamepad driver from ${LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR}")
+    install(DIRECTORY "${LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR}/driver"
+                      "${LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR}/tools"
+            DESTINATION "drivers/vhf-gamepad"
+            COMPONENT vhf_gamepad)
+    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/vhf-gamepad/install.ps1"
+            DESTINATION "drivers/vhf-gamepad"
+            COMPONENT vhf_gamepad)
+endif()
+
 # Mandatory scripts
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/service/"
         DESTINATION "scripts"
@@ -102,6 +130,10 @@ set(CPACK_COMPONENT_SUDOVDA_DISPLAY_NAME "SudoVDA")
 set(CPACK_COMPONENT_SUDOVDA_DESCRIPTION "Driver required for Virtual Display to function.")
 set(CPACK_COMPONENT_SUDOVDA_GROUP "Drivers")
 set(CPACK_COMPONENT_SUDOVDA_REQUIRED true)
+set(CPACK_COMPONENT_VHF_GAMEPAD_DISPLAY_NAME "VHF Virtual Gamepad")
+set(CPACK_COMPONENT_VHF_GAMEPAD_DESCRIPTION
+    "Virtual gamepad driver (Xbox, DualShock 4, DualSense, Switch Pro), an alternative to ViGEmBus.")
+set(CPACK_COMPONENT_VHF_GAMEPAD_GROUP "Drivers")
 
 # audio tool
 set(CPACK_COMPONENT_AUDIO_DISPLAY_NAME "audio-info")

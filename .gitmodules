@@ -70,3 +70,7 @@
 	path = third-party/pyrowave
 	url = https://github.com/Lavagnou/pyrowave.git
 	branch = lavartemis
+[submodule "third-party/libvirtualgamepad"]
+	path = third-party/libvirtualgamepad
+	url = https://github.com/Nonary/libvirtualgamepad.git
+	branch = main

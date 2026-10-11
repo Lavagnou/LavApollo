@@ -205,6 +205,28 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
   - `remote_monitor_mute_audio` leaves its audio out (`config.audio.input_only`).
   - Vibepollo's "Remote Input" is LavApollo's existing input-only mode; nothing to port there.
 
+- **VHF virtual gamepad** (after Vibepollo; `docs/vhf-gamepad.md`). A second gamepad driver beside
+  ViGEmBus: Nonary's libvirtualgamepad. The client protocol comes from the `third-party/libvirtualgamepad`
+  submodule; the driver is the separately released archive, bundled by the installer. New `gamepad`
+  values: `vhf` (follows the client's controller), `vhf_xbox`, `vhf_xbox_one`, `vhf_ds4`, `vhf_ds5`,
+  `vhf_switch`. `auto` falls back to VHF only when ViGEmBus is missing.
+  - `input_raw_t::gamepad_backend[]` records **per slot** which driver created a gamepad. Every
+    update, touch, motion, battery and free call dispatches on it, never on the current config:
+    both drivers can own slots in the same session.
+  - x360/ds4 are now reported disabled when ViGEmBus is not installed (`vigem_t::available()`).
+    Before, `vigem_t::init()` always succeeded, so they always showed as available.
+  - ⚠️ **The archive is unsigned. CI signs it with LavApollo's self-signed certificate**
+    (`scripts/prepare-vhf-gamepad.ps1`; secrets `VHF_SIGNING_CERT_BASE64` / `VHF_SIGNING_CERT_PASSWORD`,
+    created by the user with `scripts/generate-vhf-signing-cert.ps1`). The catalogue and the setup
+    tool are signed; the driver DLL **must not be**, because the catalogue hashes it.
+    `drivers/vhf-gamepad/install.ps1` adds the `.cer` to LocalMachine Root + TrustedPublisher, like
+    SudoVDA. Every such PC trusts that key, so it must live only in the secrets.
+  - Without the secrets the release still builds, without the driver, and the workflow warns.
+    `LAVAPOLLO_VHF_GAMEPAD_PACKAGE_DIR` is empty, so CMake installs nothing and NSIS skips it
+    (`IfFileExists`).
+  - The archive URL and SHA-256 (`prepare-vhf-gamepad.ps1`) and the submodule commit move **together**.
+  - `install.ps1` is always best effort (exit 0): a failing gamepad driver must not fail the installer.
+
 - **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
   previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
   IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in
