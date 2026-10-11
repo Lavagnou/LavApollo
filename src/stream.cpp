@@ -2481,6 +2481,8 @@ namespace stream {
         // edge otherwise) and Smooth Motion is switched on in the driver when asked for.
         const auto frame_generation = proc::proc.frame_generation;
         const bool framegen_active = frame_generation != "off";
+        // VRR only works if the game is held at the stream rate; the 1000 Hz display does not.
+        const bool vrr_active = session.config.monitor.vrr_low_latency;
         const auto policy = framegen::make_stream_start_policy({
           .fps = session.config.monitor.framerate,
           .fps_scaled = session.config.monitor.encodingFramerate,
@@ -2489,7 +2491,7 @@ namespace stream {
           .frame_generation_provider = framegen_active ? frame_generation : std::string {"lossless-scaling"},
           .uses_virtual_display = proc::proc.virtual_display,
           .capture_mode = config::video.capture,
-          .auto_virtual_framegen_limiter = framegen_active,
+          .auto_virtual_framegen_limiter = framegen_active || vrr_active,
         });
         platf::frame_limiter_streaming_start(platf::frame_limiter_owner::rtsp, policy);
       }

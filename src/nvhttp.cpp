@@ -572,6 +572,7 @@ namespace nvhttp {
     launch_session->enable_hdr = util::from_view(get_arg(args, "hdrMode", "0"));
     launch_session->virtual_display = util::from_view(get_arg(args, "virtualDisplay", "0")) || named_cert_p->always_use_virtual_display;
     launch_session->scale_factor = util::from_view(get_arg(args, "scaleFactor", "100"));
+    launch_session->client_vrr_requested = util::from_view(get_arg(args, "clientVrrRequested", "0"));
 
 #ifdef _WIN32
     // Validated against the mode parsed above, so an admin-side display_mode override for

@@ -331,6 +331,15 @@ namespace proc {
         const int refresh_multiplier = _app.frame_generation != "off" ? 4 : (config::video.double_refreshrate ? 2 : 1);
         target_fps = (int) framegen::saturating_refresh_millihz((std::uint32_t) target_fps, refresh_multiplier);
 
+        // A VRR client paces from the RTP timestamps, which are taken when capture sees the
+        // frame -- and capture only sees it on the display's next refresh. At 1000 Hz that is
+        // within a millisecond of the game presenting it, whatever the stream rate; the frame
+        // limiter keeps the game itself at the stream rate.
+        if (launch_session->client_vrr_requested && config::video.vrr_virtual_display_refresh) {
+          target_fps = 1'000'000;
+          BOOST_LOG(info) << "VRR client: virtual displays refresh at 1000 Hz"sv;
+        }
+
         // No matter we get the display name or not, the virtual display might still be created.
         // We need to track it properly to remove the display when the session terminates.
         launch_session->virtual_display = true;

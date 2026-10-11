@@ -1719,6 +1719,29 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
 </table>
 
+### vrr_virtual_display_refresh
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            When a client paces playback on a VRR (G-Sync / FreeSync) screen, refresh its virtual display at 1000 Hz so each frame is captured within a millisecond of the game presenting it, instead of on the next refresh at the stream rate. The stream frame rate does not change; the frame limiter keeps the game at it.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            vrr_virtual_display_refresh = enabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### frame_limiter_enable
 
 <table>

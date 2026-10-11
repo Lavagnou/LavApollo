@@ -172,6 +172,20 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
     libdisplaydevice). The `severity` log keyword moved to `logging.h` for it.
   - `video::config_t::vrr_low_latency` is appended (for VRR): it shrinks the helper's frame pool to one.
 
+- **VRR clients** (after Vibepollo; client side in LavArtemis). A client that presents frames on a
+  G-Sync/FreeSync screen as they come sends `clientVrrRequested=1` on `/launch`/`/resume` -- the only
+  protocol addition; it paces from the RTP timestamps every host already sends, and a host that ignores
+  the parameter just streams as before. LavApollo then:
+  - creates the session's virtual displays at **1000 Hz** (`vrr_virtual_display_refresh`, default on):
+    a frame is timestamped when capture sees it, which is on the display's next refresh, so the
+    display's own refresh would otherwise quantize every timestamp. Retried at the stream rate if
+    SudoVDA refuses it -- **unverified that SudoVDA accepts 1000 Hz**; check the creation log line;
+  - sets `video::config_t::vrr_low_latency` (WGC helper keeps a one-frame pool);
+  - starts the frame limiter on virtual-display sessions, since VRR only helps if the game itself
+    runs at the stream rate. On a physical display the limiter must be enabled by hand.
+  - Not ported: Vibepollo's ETW present-time stamping (`present_timing`), which moves WGC timestamps to
+    the game's Present cadence. The 1000 Hz display gets most of that benefit.
+
 - **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
   previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
   IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in

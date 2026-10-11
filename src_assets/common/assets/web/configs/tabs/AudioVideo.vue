@@ -162,6 +162,15 @@ const validateFallbackMode = (event) => {
               v-if="platform === 'windows'"
     ></Checkbox>
 
+    <!-- 1000 Hz virtual displays for VRR clients -->
+    <Checkbox class="mb-3"
+              id="vrr_virtual_display_refresh"
+              locale-prefix="config"
+              v-model="config.vrr_virtual_display_refresh"
+              default="true"
+              v-if="platform === 'windows'"
+    ></Checkbox>
+
     <!-- Frame Limiter -->
     <FrameLimiter :config="config" v-if="platform === 'windows'" />
 

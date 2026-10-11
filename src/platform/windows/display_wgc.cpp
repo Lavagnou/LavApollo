@@ -3,6 +3,9 @@
  * @brief Definitions for WinRT Windows.Graphics.Capture API
  */
 // platform includes
+// winsock2.h must precede windows.h, which display.h pulls in; ipc_session.h needs it.
+#include <winsock2.h>
+
 #include <dxgi1_2.h>
 
 // Gross hack to work around MINGW-packages#22160

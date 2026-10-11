@@ -83,6 +83,10 @@ namespace rtsp_stream {
     bool enable_hdr;
     bool enable_sops;
     bool virtual_display;
+    // The client paces playback from RTP timestamps on a VRR display (clientVrrRequested=1 on
+    // /launch or /resume): virtual displays refresh at 1000 Hz so each frame is captured within
+    // a millisecond of the game presenting it, and capture queues stay minimal.
+    bool client_vrr_requested = false;
     uint32_t scale_factor;
 
     std::optional<crypto::cipher::gcm_t> rtsp_cipher;

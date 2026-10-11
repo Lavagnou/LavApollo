@@ -24,6 +24,7 @@ namespace config {
     bool headless_mode;
     bool limit_framerate;
     bool double_refreshrate;
+    bool vrr_virtual_display_refresh;  ///< 1000 Hz virtual displays for clients that request VRR pacing
     // ffmpeg params
     int qp;  // higher == more compression and less quality
 

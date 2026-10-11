@@ -1048,6 +1048,10 @@ namespace rtsp_stream {
       }
 
       config.monitor.input_only = session.input_only;
+      config.monitor.vrr_low_latency = session.client_vrr_requested;
+      if (session.client_vrr_requested) {
+        BOOST_LOG(info) << "Client paces playback from RTP timestamps (VRR)"sv;
+      }
 
       configuredBitrateKbps = util::from_view(args.at("x-ml-video.configuredBitrateKbps"sv));
 
