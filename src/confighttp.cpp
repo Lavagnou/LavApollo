@@ -18,6 +18,7 @@
 
 // lib includes
 #include <boost/algorithm/string.hpp>
+#include <display_device/json.h>
 #include <boost/asio/ssl/context.hpp>
 #include <boost/filesystem.hpp>
 #include <nlohmann/json.hpp>
@@ -40,6 +41,7 @@
 #include "platform/common.h"
 #include "process.h"
 #include "rtsp.h"
+#include "video.h"
 #include "session_history.h"
 #include "stream.h"
 #include "utility.h"
@@ -49,6 +51,7 @@
 
 #ifdef _WIN32
   #include "platform/windows/frame_limiter.h"
+  #include "platform/windows/misc.h"
   #include "platform/windows/utils.h"
 #endif
 
@@ -1278,6 +1281,28 @@ namespace confighttp {
 
     print_req(request);
     std::string content = file_handler::read_file(config::sunshine.log_file.c_str());
+
+    // tail=N keeps the last N lines (the v2 log viewer); without it, the whole file
+    const auto query = request->parse_query_string();
+    if (const auto tail = query.find("tail"); tail != query.end()) {
+      std::size_t lines = 0;
+      try {
+        lines = std::stoul(tail->second);
+      } catch (...) {}
+      if (lines > 0) {
+        std::size_t pos = content.size();
+        if (pos > 0 && content[pos - 1] == '\n') {
+          --pos;
+        }
+        for (std::size_t found = 0; pos > 0 && found < lines; --pos) {
+          if (content[pos - 1] == '\n' && ++found == lines) {
+            break;
+          }
+        }
+        content.erase(0, pos);
+      }
+    }
+
     SimpleWeb::CaseInsensitiveMultimap headers;
     std::string contentType = "text/plain";
   #ifdef _WIN32
@@ -2223,6 +2248,333 @@ namespace confighttp {
   }
 
   /**
+   * @brief Serve the v2 web UI (`/v2/...`), a single-page app built into `WEB_DIR/v2`.
+   * @details Its files are public, like the current UI's assets: every API call it makes still
+   *          authenticates. A path that is not a file is a route of the app, answered with its
+   *          `index.html`. Hashed bundles are cached for a year, `index.html` never.
+   */
+  void getWebV2(resp_https_t response, req_https_t request) {
+    if (!checkIPOrigin(response, request)) {
+      return;
+    }
+
+    const fs::path root = fs::weakly_canonical(fs::path {WEB_DIR} / "v2");
+    std::string relative = request->path.size() > 3 ? request->path.substr(3) : std::string {};  // drop "/v2"
+    while (!relative.empty() && relative.front() == '/') {
+      relative.erase(relative.begin());
+    }
+
+    auto file = fs::weakly_canonical(root / fs::path {relative});
+    const bool inside = file == root || isChildPath(file, root);
+    if (!inside) {
+      BOOST_LOG(warning) << "Web UI v2: refusing "sv << request->path << ", outside the v2 folder"sv;
+      bad_request(response, request);
+      return;
+    }
+
+    const bool is_file = !relative.empty() && fs::is_regular_file(file);
+    if (!is_file) {
+      // An asset that is missing is a 404; anything else is a route of the app
+      if (relative.starts_with("assets/") || relative.starts_with("images/")) {
+        not_found(response, request);
+        return;
+      }
+      file = root / "index.html";
+      if (!fs::exists(file)) {
+        not_found(response, request);
+        return;
+      }
+    }
+
+    const auto extension = file.extension().string();
+    const auto mime = mime_types.find(extension.empty() ? std::string {} : extension.substr(1));
+    if (mime == mime_types.end()) {
+      bad_request(response, request);
+      return;
+    }
+
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", mime->second == "text/html" ? "text/html; charset=utf-8" : mime->second);
+    headers.emplace("X-Frame-Options", "DENY");
+    headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
+    headers.emplace("Cache-Control", relative.starts_with("assets/") && extension != ".json" ? "public, max-age=31536000, immutable" : "no-cache");
+    std::ifstream in(file.string(), std::ios::binary);
+    response->write(SimpleWeb::StatusCode::success_ok, in, headers);
+  }
+
+  /**
+   * @brief Whether credentials exist and whether this browser is signed in.
+   * @details Refreshes the login here when only the session token has run out, so that loading
+   *          the v2 UI does not ask for the password every two hours.
+   *
+   * @api_examples{/api/auth/status| GET| null}
+   */
+  void getAuthStatus(resp_https_t response, req_https_t request) {
+    if (!checkIPOrigin(response, request)) {
+      return;
+    }
+
+    const bool configured = !config::sunshine.username.empty();
+    bool authenticated = configured && web_sessions().validate(request_cookie(request, web_auth::session_cookie_name)).has_value();
+
+    SimpleWeb::CaseInsensitiveMultimap headers {
+      {"Content-Type", "application/json"},
+      {"X-Frame-Options", "DENY"},
+      {"Content-Security-Policy", "frame-ancestors 'none';"}
+    };
+    if (configured && !authenticated) {
+      if (auto tokens = refresh_from_cookie(request)) {
+        add_session_cookies(headers, *tokens);
+        authenticated = true;
+      }
+    }
+
+    nlohmann::json output_tree;
+    output_tree["authenticated"] = authenticated;
+    output_tree["credentials_configured"] = configured;
+    output_tree["login_required"] = configured && !authenticated;
+    response->write(output_tree.dump(), headers);
+  }
+
+  /**
+   * @brief What the host is and what it can do, for the v2 UI. Never probes anything.
+   *
+   * @api_examples{/api/metadata| GET| null}
+   */
+  void getMetadata(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    nlohmann::json output_tree;
+    output_tree["status"] = true;
+    output_tree["platform"] = SUNSHINE_PLATFORM;
+    output_tree["version"] = PROJECT_VERSION;
+    output_tree["commit"] = PROJECT_VERSION_COMMIT;
+    output_tree["prerelease"] = "";
+    output_tree["branch"] = "unknown";
+    output_tree["release_date"] = "";
+    output_tree["providers"] = nlohmann::json::object();
+
+    const bool probed = video::encoder_probe_succeeded();
+    output_tree["encoder_status"] = {
+      {"state", probed ? "ready" : "unknown"},
+      {"h264", probed},
+      {"hevc", probed && video::active_hevc_mode >= 2},
+      {"av1", probed && video::active_av1_mode >= 2},
+    };
+
+#ifdef _WIN32
+    const auto driver_status = proc::vDisplayDriverStatus;
+    const auto status_name = [&]() -> const char * {
+      switch (driver_status) {
+        case VDISPLAY::DRIVER_STATUS::OK:
+          return "ready";
+        case VDISPLAY::DRIVER_STATUS::FAILED:
+          return "failed";
+        case VDISPLAY::DRIVER_STATUS::VERSION_INCOMPATIBLE:
+          return "version_incompatible";
+        case VDISPLAY::DRIVER_STATUS::WATCHDOG_FAILED:
+          return "watchdog_failed";
+        default:
+          return "unknown";
+      }
+    }();
+    output_tree["virtual_display_driver"] = {
+      {"configured", "sudovda"},
+      {"active", driver_status == VDISPLAY::DRIVER_STATUS::OK ? nlohmann::json("sudovda") : nlohmann::json(nullptr)},
+      {"status", status_name},
+      {"status_code", static_cast<int>(driver_status)},
+    };
+
+    output_tree["has_nvidia_gpu"] = platf::has_nvidia_gpu();
+    output_tree["has_amd_gpu"] = platf::has_amd_gpu();
+#endif
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Change some configuration keys, keeping the others. `null` or `""` removes a key.
+   * @details LavApollo reads its configuration at startup, so a change applies after a restart.
+   *
+   * @api_examples{/api/config| PATCH| {"key":"value"}}
+   */
+  void patchConfig(resp_https_t response, req_https_t request) {
+    if (!validateContentType(response, request, "application/json") || !authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    std::stringstream ss;
+    ss << request->content.rdbuf();
+    try {
+      const nlohmann::json patch_tree = nlohmann::json::parse(ss);
+      if (!patch_tree.is_object()) {
+        bad_request(response, request, "PATCH body must be a JSON object");
+        return;
+      }
+
+      auto current = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
+      for (const auto &[key, value] : patch_tree.items()) {
+        if (value.is_null() || (value.is_string() && value.get<std::string>().empty())) {
+          current.erase(key);
+        } else {
+          // Strings are written raw, anything else as JSON, like saveConfig()
+          current[key] = value.is_string() ? value.get<std::string>() : value.dump();
+        }
+      }
+
+      // Sorted, so that saving one key does not reshuffle the file
+      std::map<std::string, std::string> ordered {current.begin(), current.end()};
+      std::stringstream config_stream;
+      for (const auto &[key, value] : ordered) {
+        config_stream << key << " = " << value << std::endl;
+      }
+      file_handler::write_file(config::sunshine.config_file.c_str(), config_stream.str());
+
+      nlohmann::json output_tree;
+      output_tree["status"] = true;
+      output_tree["appliedNow"] = false;
+      output_tree["deferred"] = false;
+      output_tree["restartRequired"] = true;
+      send_response(response, output_tree);
+    } catch (std::exception &e) {
+      BOOST_LOG(warning) << "PatchConfig: "sv << e.what();
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
+   * @brief The display devices Windows knows, active or not.
+   *
+   * @api_examples{/api/display-devices| GET| null}
+   */
+  void getDisplayDevices(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    try {
+      const auto devices = display_device::enumerate_devices();
+      SimpleWeb::CaseInsensitiveMultimap headers {
+        {"Content-Type", "application/json"},
+        {"X-Frame-Options", "DENY"},
+        {"Content-Security-Policy", "frame-ancestors 'none';"}
+      };
+      response->write(display_device::toJson(devices), headers);
+    } catch (const std::exception &e) {
+      bad_request(response, request, std::string {"Failed to enumerate display devices: "} + e.what());
+    }
+  }
+
+  /**
+   * @brief Whether the ViGEmBus gamepad driver is installed.
+   *
+   * @api_examples{/api/health/vigem| GET| {"installed":true}}
+   */
+  void getVigemHealth(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    nlohmann::json output_tree;
+#ifdef _WIN32
+    bool installed = false;
+    if (auto scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT)) {
+      if (auto service = OpenServiceW(scm, L"ViGEmBus", SERVICE_QUERY_STATUS)) {
+        installed = true;
+        CloseServiceHandle(service);
+      }
+      CloseServiceHandle(scm);
+    }
+    output_tree["installed"] = installed;
+    // Not needed when the user picked the VHF gamepad driver (docs/vhf-gamepad.md)
+    output_tree["required"] = !config::input.gamepad.starts_with("vhf");
+#else
+    output_tree["installed"] = false;
+    output_tree["required"] = false;
+#endif
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Delete an application by UUID (the v2 UI's form of `POST /api/apps/delete`).
+   *
+   * @api_examples{/api/apps/{uuid}| DELETE| null}
+   */
+  void deleteAppByUuid(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    try {
+      const auto uuid = request->path_match[1].str();
+      nlohmann::json file_tree = nlohmann::json::parse(file_handler::read_file(config::stream.file_apps.c_str()));
+      bool removed = false;
+      if (file_tree.contains("apps") && file_tree["apps"].is_array()) {
+        auto &apps = file_tree["apps"];
+        const auto end = std::remove_if(apps.begin(), apps.end(), [&uuid](const nlohmann::json &app) {
+          return app.value("uuid", "") == uuid;
+        });
+        removed = end != apps.end();
+        apps.erase(end, apps.end());
+      }
+      if (!removed) {
+        not_found(response, request);
+        return;
+      }
+
+      file_handler::write_file(config::stream.file_apps.c_str(), file_tree.dump(4));
+      proc::refresh(config::stream.file_apps);
+
+      nlohmann::json output_tree;
+      output_tree["status"] = true;
+      send_response(response, output_tree);
+    } catch (std::exception &e) {
+      BOOST_LOG(warning) << "DeleteApp: "sv << e.what();
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
+   * @brief An application's cover image, by UUID; the default box art when it has none.
+   *
+   * @api_examples{/api/apps/{uuid}/cover| GET| null}
+   */
+  void getAppCover(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    try {
+      const auto uuid = request->path_match[1].str();
+      std::string image_path;
+      const nlohmann::json file_tree = nlohmann::json::parse(file_handler::read_file(config::stream.file_apps.c_str()));
+      for (const auto &app : file_tree.value("apps", nlohmann::json::array())) {
+        if (app.value("uuid", "") == uuid) {
+          image_path = app.value("image-path", "");
+          break;
+        }
+      }
+
+      const auto file = proc::validate_app_image_path(image_path);
+      const auto extension = fs::path {file}.extension().string();
+      const auto mime = mime_types.find(extension.empty() ? std::string {} : extension.substr(1));
+
+      SimpleWeb::CaseInsensitiveMultimap headers;
+      headers.emplace("Content-Type", mime != mime_types.end() ? mime->second : "image/png");
+      headers.emplace("X-Frame-Options", "DENY");
+      headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
+      headers.emplace("Cache-Control", "no-cache");
+      std::ifstream in(file, std::ios::binary);
+      response->write(SimpleWeb::StatusCode::success_ok, in, headers);
+    } catch (std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
    * @brief Trade the refresh cookie for a new pair of login cookies.
    * @details What the web UI calls when an API request returns 401, before retrying it once.
    *
@@ -2285,6 +2637,7 @@ namespace confighttp {
     for (const auto &session : web_sessions().list(current.value_or(""))) {
       sessions.push_back({
         {"id", session.id},
+        {"username", session.username},
         {"device", session.device},
         {"address", session.address},
         {"created_at", to_unix(session.created_at)},
@@ -2292,6 +2645,10 @@ namespace confighttp {
         {"expires_at", to_unix(session.expires_at)},
         {"remember_me", session.remember_me},
         {"current", session.current},
+        // The names the v2 UI reads
+        {"device_label", session.device},
+        {"remote_address", session.address},
+        {"refresh_expires_at", to_unix(session.expires_at)},
       });
     }
     nlohmann::json output_tree;
@@ -2395,6 +2752,15 @@ namespace confighttp {
     server.resource["^/api/auth/sessions$"]["GET"] = getSessions;
     server.resource["^/api/auth/sessions/([A-Za-z0-9]+)$"]["DELETE"] = revokeSession;
     server.resource["^/api/csrf-token$"]["GET"] = getCSRFToken;
+    server.resource["^/v2(/.*)?$"]["GET"] = getWebV2;
+    server.resource["^/api/auth/status$"]["GET"] = getAuthStatus;
+    server.resource["^/api/auth/login$"]["POST"] = login;
+    server.resource["^/api/metadata$"]["GET"] = getMetadata;
+    server.resource["^/api/config$"]["PATCH"] = patchConfig;
+    server.resource["^/api/display-devices$"]["GET"] = getDisplayDevices;
+    server.resource["^/api/health/vigem$"]["GET"] = getVigemHealth;
+    server.resource["^/api/apps/([A-Fa-f0-9-]+)$"]["DELETE"] = deleteAppByUuid;
+    server.resource["^/api/apps/([A-Fa-f0-9-]+)/cover$"]["GET"] = getAppCover;
     server.resource["^/api/session/status$"]["GET"] = getSessionStatus;
     server.resource["^/api/host/stats$"]["GET"] = getHostStats;
     server.resource["^/api/host/info$"]["GET"] = getHostInfo;

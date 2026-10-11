@@ -110,6 +110,45 @@ order as that tab's `options` object** (`ConfigOptionsInSameOrderWithinSections`
 supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `config.html` freely.
 ⚠️ These tests had silently gone red upstream (19 undocumented options, 5 labels the UI asked for but
 `en.json` never defined) and were brought back to green before the Vibepollo ports; keep them green.
+The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at build time from
+`config.html` + the `.vue` tabs (`web-v2/scripts/generate-settings.mjs`), labels included.
+
+- **Web UI v2** (`src_assets/common/assets/web-v2/`, served at `/v2`; Vibepollo's v2 UI). The current UI
+  stays at `/` for now; v2 is meant to replace it eventually.
+  - **Build**: the `web-ui` target builds it **after** the current UI. The current UI's build empties
+    `assets/web`; this one only empties `assets/web/v2`. The output goes to `SUNSHINE_WEB_OUTPUT_DIR`.
+    Packaging already ships all of `assets/web`.
+  - **Serving**: `getWebV2()` serves `^/v2(/.*)?$` without authentication, like the current UI's
+    `/assets`; every API call still authenticates. A path that is not a file returns `index.html` (SPA
+    routes), except under `assets/` and `images/`. Hashed bundles are cached as immutable;
+    `index.html` and `.json` files are not.
+  - ⚠️ **Settings are generated, not hand-written.** `generate-settings.mjs` reads the current UI's
+    tabs: one category per tab, encoder tabs merged into "Encoders". Field kinds come from the controls:
+    `<Checkbox>` → boolean, `<select>` options with their `<template #platform>`, `type="number"`
+    bounds. Special editors are set in `specialKinds`. Labels resolve through `config.<key>` in the
+    current catalogue. Vibepollo's hand-written schema described options LavApollo does not have.
+  - **Strings**: three catalogues, later ones win. `web-v2/public/assets/locale/fallback/en.json`
+    (Vibepollo's strings, for keys LavApollo lacks), then `/assets/locale/<locale>.json` (the current
+    UI's, the single source for settings labels), then `web-v2/public/assets/locale/ui/en.json` (strings
+    only v2 uses).
+  - **Application editor rewritten** (`views/ApplicationView.vue`). Vibepollo's 5,900-line editor
+    edits its own app model: Playnite/Steam/Lutris links, Lossless Scaling profiles, RTX HDR,
+    `display-output`, `config-overrides`. Porting it would have offered settings that silently vanish.
+    The new editor edits exactly the fields `process.cpp` reads, like `apps.html`, and keeps unknown
+    fields when saving. The device editor was cut down the same way: no output override, virtual
+    display mode or layout, HDR profile or per-client overrides. Only "always create a virtual display"
+    maps to `always_use_virtual_display`.
+  - **Removed, not ported**: browser streaming (WebRTC), API tokens, integrations
+    (Playnite/Steam/Lutris/MangoHud), update notices and release notes, the display layout editor
+    (conflicts with the client's `displayLayout`), crash dumps, display-helper snapshots, and Linux
+    capture status.
+  - **Server routes added for it**: `/api/auth/status` (also refreshes an expired session token),
+    `/api/auth/login` (alias of `/api/login`), `/api/metadata`, `PATCH /api/config` (merges keys and
+    writes them sorted; `restartRequired: true`, since LavApollo reads its config at startup),
+    `/api/display-devices`, `/api/health/vigem`, `DELETE /api/apps/{uuid}`, `/api/apps/{uuid}/cover`, and
+    `GET /api/logs?tail=N`.
+  - `api/client.ts` refreshes on 401 once, sharing one in-flight refresh, like `init.js` in the current
+    UI. It sends `X-CSRF-Token` from `/api/csrf-token` on every mutation, which `check_csrf()` accepts.
 
 - **Frame limiter** (`config.frame_limiter_*`, `rtss_*`; ported from Vibepollo:
   `src/platform/windows/frame_limiter*.{h,cpp}`, `rtss_integration.{h,cpp}`, `src/framegen_policy.h`).

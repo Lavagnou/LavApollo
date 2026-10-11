@@ -65,6 +65,10 @@ add_custom_target(web-ui ALL
         COMMENT "Installing NPM Dependencies and Building the Web UI"
         COMMAND "$<$<BOOL:${WIN32}>:cmd;/C>" "${NPM}" install ${NPM_INSTALL_FLAGS}
         COMMAND "${CMAKE_COMMAND}" -E env "SUNSHINE_BUILD_HOMEBREW=${NPM_BUILD_HOMEBREW}" "SUNSHINE_SOURCE_ASSETS_DIR=${NPM_SOURCE_ASSETS_DIR}" "SUNSHINE_ASSETS_DIR=${NPM_ASSETS_DIR}" "$<$<BOOL:${WIN32}>:cmd;/C>" "${NPM}" run build  # cmake-lint: disable=C0301
+        # The v2 UI (served at /v2), after the current one: that build empties assets/web, this
+        # one only assets/web/v2. Its settings page is generated from the current UI's tabs.
+        COMMAND "$<$<BOOL:${WIN32}>:cmd;/C>" "${NPM}" install ${NPM_INSTALL_FLAGS} --prefix "${CMAKE_SOURCE_DIR}/src_assets/common/assets/web-v2"
+        COMMAND "${CMAKE_COMMAND}" -E env "$<$<BOOL:${NPM_ASSETS_DIR}>:SUNSHINE_WEB_OUTPUT_DIR=${NPM_ASSETS_DIR}/assets/web/v2>" "$<$<BOOL:${WIN32}>:cmd;/C>" "${NPM}" run build --prefix "${CMAKE_SOURCE_DIR}/src_assets/common/assets/web-v2"  # cmake-lint: disable=C0301
         COMMAND_EXPAND_LISTS
         VERBATIM)
 

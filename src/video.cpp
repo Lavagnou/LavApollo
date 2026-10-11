@@ -3382,4 +3382,7 @@ namespace video {
     return platf::pix_fmt_e::unknown;
   }
 
+  bool encoder_probe_succeeded() {
+    return chosen_encoder != nullptr;
+  }
 }  // namespace video

@@ -26,8 +26,17 @@ curl) are not affected.
 ## POST /api/apps/close
 @copydoc confighttp::closeApp()
 
+## DELETE /api/apps/{uuid}
+@copydoc confighttp::deleteAppByUuid()
+
+## GET /api/apps/{uuid}/cover
+@copydoc confighttp::getAppCover()
+
 ## DELETE /api/apps/{index}
 @copydoc confighttp::deleteApp()
+
+## GET /api/auth/status
+@copydoc confighttp::getAuthStatus()
 
 ## POST /api/auth/logout
 @copydoc confighttp::logout()
@@ -59,11 +68,20 @@ curl) are not affected.
 ## POST /api/config
 @copydoc confighttp::saveConfig()
 
+## PATCH /api/config
+@copydoc confighttp::patchConfig()
+
 ## POST /api/covers/upload
 @copydoc confighttp::uploadCover()
 
 ## GET /api/csrf-token
 @copydoc confighttp::getCSRFToken()
+
+## GET /api/display-devices
+@copydoc confighttp::getDisplayDevices()
+
+## GET /api/health/vigem
+@copydoc confighttp::getVigemHealth()
 
 ## GET /api/history/sessions
 @copydoc confighttp::listSessionHistory()
@@ -85,6 +103,9 @@ curl) are not affected.
 
 ## GET /api/logs
 @copydoc confighttp::getLogs()
+
+## GET /api/metadata
+@copydoc confighttp::getMetadata()
 
 ## POST /api/password
 @copydoc confighttp::savePassword()

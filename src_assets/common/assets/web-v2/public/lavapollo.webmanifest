@@ -1,0 +1,19 @@
+{
+  "id": "/v2/",
+  "name": "LavApollo",
+  "short_name": "LavApollo",
+  "description": "LavApollo host administration",
+  "start_url": "/v2/",
+  "scope": "/v2/",
+  "display": "standalone",
+  "background_color": "#101218",
+  "theme_color": "#101218",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/v2/images/apollo.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

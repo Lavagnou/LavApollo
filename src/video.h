@@ -400,4 +400,9 @@ namespace video {
    * @warning This is only safe to call when there is no client actively streaming.
    */
   int probe_encoders();
+
+  /**
+   * @brief Whether the last encoder probe found a working encoder. Never probes.
+   */
+  bool encoder_probe_succeeded();
 }  // namespace video
