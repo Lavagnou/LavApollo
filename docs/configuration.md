@@ -426,6 +426,124 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
 </table>
 
+### realtime_stats_enabled
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Sample the host's CPU, GPU, memory and network for the web UI and the session history.
+            Disabled, the sampler stops and history samples carry no host metrics.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            realtime_stats_enabled = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### realtime_stats_poll_interval_ms
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            How often host stats are sampled, in milliseconds, from 250 to 60000.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            2000
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            realtime_stats_poll_interval_ms = 1000
+            @endcode</td>
+    </tr>
+</table>
+
+### session_history_enabled
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Record every stream in a local SQLite database (`lavapollo_history.db` next to the state
+            file): its settings, then each second its frame rate, bitrate, encode latency, losses and the host's load.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            session_history_enabled = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### session_history_ttl_days
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Delete ended sessions older than this many days. 0 never deletes by age.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            90
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            session_history_ttl_days = 30
+            @endcode</td>
+    </tr>
+</table>
+
+### session_history_db_size_limit_mb
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            When the history database grows past this many MiB, delete the oldest ended sessions.
+            0 never deletes by size.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            256
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            session_history_db_size_limit_mb = 1024
+            @endcode</td>
+    </tr>
+</table>
+
 ## Input
 
 ### controller

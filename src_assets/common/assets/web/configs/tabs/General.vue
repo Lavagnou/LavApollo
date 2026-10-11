@@ -252,6 +252,40 @@ onMounted(() => {
               v-model="config.hide_tray_controls"
               default="false"
     ></Checkbox>
+
+    <!-- Live host stats -->
+    <Checkbox class="mb-3"
+              id="realtime_stats_enabled"
+              locale-prefix="config"
+              v-model="config.realtime_stats_enabled"
+              default="true"
+    ></Checkbox>
+    <div class="mb-3">
+      <label for="realtime_stats_poll_interval_ms" class="form-label">{{ $t('config.realtime_stats_poll_interval_ms') }}</label>
+      <input type="number" min="250" max="60000" class="form-control" id="realtime_stats_poll_interval_ms" placeholder="2000"
+             v-model="config.realtime_stats_poll_interval_ms" />
+      <div class="form-text">{{ $t('config.realtime_stats_poll_interval_ms_desc') }}</div>
+    </div>
+
+    <!-- Session history -->
+    <Checkbox class="mb-3"
+              id="session_history_enabled"
+              locale-prefix="config"
+              v-model="config.session_history_enabled"
+              default="true"
+    ></Checkbox>
+    <div class="mb-3">
+      <label for="session_history_ttl_days" class="form-label">{{ $t('config.session_history_ttl_days') }}</label>
+      <input type="number" min="0" class="form-control" id="session_history_ttl_days" placeholder="90"
+             v-model="config.session_history_ttl_days" />
+      <div class="form-text">{{ $t('config.session_history_ttl_days_desc') }}</div>
+    </div>
+    <div class="mb-3">
+      <label for="session_history_db_size_limit_mb" class="form-label">{{ $t('config.session_history_db_size_limit_mb') }}</label>
+      <input type="number" min="0" class="form-control" id="session_history_db_size_limit_mb" placeholder="256"
+             v-model="config.session_history_db_size_limit_mb" />
+      <div class="form-text">{{ $t('config.session_history_db_size_limit_mb_desc') }}</div>
+    </div>
   </div>
 </template>
 

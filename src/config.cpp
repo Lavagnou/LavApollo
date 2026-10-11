@@ -627,6 +627,11 @@ namespace config {
     std::chrono::hours(2),  // session_token_ttl
     std::chrono::hours(24 * 7),  // remember_me_refresh_token_ttl
     {},  // csrf_allowed_origins
+    true,  // realtime_stats_enabled
+    2000,  // realtime_stats_poll_interval_ms
+    true,  // session_history_enabled
+    90,  // session_history_ttl_days
+    256,  // session_history_db_size_limit_mb
   };
 
   bool endline(char ch) {
@@ -1371,6 +1376,11 @@ namespace config {
     bool_f(vars, "envvar_compatibility_mode", sunshine.envvar_compatibility_mode);
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);
     bool_f(vars, "update_auto_check", sunshine.update_auto_check);
+    bool_f(vars, "realtime_stats_enabled", sunshine.realtime_stats_enabled);
+    int_between_f(vars, "realtime_stats_poll_interval_ms", sunshine.realtime_stats_poll_interval_ms, {250, 60000});
+    bool_f(vars, "session_history_enabled", sunshine.session_history_enabled);
+    int_between_f(vars, "session_history_ttl_days", sunshine.session_history_ttl_days, {0, 36500});
+    int_between_f(vars, "session_history_db_size_limit_mb", sunshine.session_history_db_size_limit_mb, {0, 1024 * 1024});
     bool_f(vars, "legacy_ordering", sunshine.legacy_ordering);
     bool_f(vars, "forward_rumble", input.forward_rumble);
 

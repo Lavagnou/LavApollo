@@ -135,6 +135,12 @@ namespace rtsp_stream {
   get_all_session_uuids();
 
   /**
+   * @brief Every streaming session, for readers that must not hold the session list's lock.
+   */
+  std::vector<std::shared_ptr<stream::session_t>>
+  get_sessions_snapshot();
+
+  /**
    * @brief Terminates all running streaming sessions.
    */
   void terminate_sessions();

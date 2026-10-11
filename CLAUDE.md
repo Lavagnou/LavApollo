@@ -254,6 +254,29 @@ supplies defaults, the on-screen order comes from the `.vue` tab, so reorder `co
     - its origin is listed in `csrf_allowed_origins`;
     - or it carries a valid `X-CSRF-Token` from `GET /api/csrf-token` (per client IP, 1 h).
 
+- **Host stats + session history** (after Vibepollo, ported nearly verbatim minus WebRTC). The web UI
+  reads them through `/api/host/{stats,info}`, `/api/rtsp/sessions`, `/api/session/status` and
+  `/api/history/sessions[/active|/{uuid}]`. The current UI does not display them; the v2 UI's Stats page does.
+  - **Host stats** (`host_stats*.{h,cpp}`, `platform/windows/host_stats.cpp`): CPU via `GetSystemTimes`,
+    GPU and encoder via PDH `GPU Engine`, VRAM via PDH, then D3DKMT, then NVML. Temperatures and
+    network are also sampled. One sampler thread, faster while a session streams.
+    - ⚠️ NVML is locked out once D3DKMT has answered once: NVML faults inside `nvml.dll` during a TDR.
+    - `-1` means "not available". Non-Windows builds get an empty provider.
+  - **History** (`session_history*.{h,cpp}`): SQLite at `lavapollo_history.db` next to the state file,
+    with tables `sessions`, `samples` (one per second) and `events`. A single writer thread with bounded
+    queues, so the stream never waits on disk.
+    - `session_t::stats` holds atomic counters. The broadcast and control threads write them; the
+      sampler reads them through `stream::get_all_session_info()` ← `rtsp_stream::get_sessions_snapshot()`.
+    - `history_uuid` is **one per session**, not the client UUID. `begin_session` runs in `start()` and
+      `end_session` in `join()` after the threads, both skipped for input-only sessions.
+    - Pruning: `session_history_ttl_days` (90) and `session_history_db_size_limit_mb` (256).
+      Vibepollo's defaults are 0 = unbounded.
+  - ⚠️ `libsqlite3.a` is linked **statically** (`windows.cmake`), like the C++ runtime: the release
+    ships no `sqlite3.dll`. CI installs `mingw-w64-ucrt-x86_64-sqlite3`.
+  - ⚠️ `session_history.cpp` / `session_history_sampler.cpp` include `stream.h` **first**: asio needs
+    WinSock2 before anything pulls in `windows.h`. Same reason `platform/windows/host_stats.cpp` opens
+    with `<winsock2.h>`, or `netioapi.h` hides `MIB_IF_ROW2`.
+
 - **Log export** (`GET /api/logs/export`, button in Troubleshooting) — a ZIP of the current log, the
   previous run's log (`<log>.backup`, rotated by `logging::init()`) and the config file, with user names,
   IP/MAC and e-mail addresses replaced by stable placeholders (`<IP_1>` is the same client everywhere in

@@ -315,6 +315,13 @@ namespace config {
     std::chrono::seconds session_token_ttl;  ///< Lifetime of a session token before it must be refreshed
     std::chrono::seconds remember_me_refresh_token_ttl;  ///< How long "remember me" keeps a login
     std::vector<std::string> csrf_allowed_origins;  ///< https:// origins allowed besides the UI's own
+
+    // Live host stats and session history (host_stats.h, session_history.h)
+    bool realtime_stats_enabled;  ///< Sample CPU/GPU/RAM/VRAM/network for the web UI and the history
+    int realtime_stats_poll_interval_ms;
+    bool session_history_enabled;  ///< Record sessions, samples and events in SQLite
+    int session_history_ttl_days;  ///< Delete ended sessions older than this (0: never)
+    int session_history_db_size_limit_mb;  ///< Prune the oldest ended sessions past this size (0: never)
   };
 
   /**

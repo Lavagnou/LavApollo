@@ -14,12 +14,14 @@
 #include "display_device.h"
 #include "entry_handler.h"
 #include "globals.h"
+#include "host_stats.h"
 #include "httpcommon.h"
 #include "logging.h"
 #include "main.h"
 #include "network.h"
 #include "nvhttp.h"
 #include "process.h"
+#include "session_history.h"
 #include "system_tray.h"
 #include "upnp.h"
 #include "uuid.h"
@@ -405,6 +407,15 @@ int main(int argc, char *argv[]) {
     BOOST_LOG(error) << "Video failed to find working encoder: probing failed."sv;
 #endif
   }
+
+  // Live host stats, then the session history that samples them. The history is one SQLite file
+  // next to the state file, like lavapollo_auth.json. Both read their settings here only: saving
+  // the config restarts LavApollo.
+  auto host_stats_deinit_guard = host_stats::start();
+  session_history::init((std::filesystem::path {config::nvhttp.file_state}.parent_path() / "lavapollo_history.db").string());
+  auto session_history_shutdown_guard = util::fail_guard([]() {
+    session_history::shutdown();
+  });
 
   if (http::init()) {
     BOOST_LOG(fatal) << "HTTP interface failed to initialize"sv;

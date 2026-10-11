@@ -2,7 +2,8 @@
 # put anything here that applies to both linux and macos
 
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
-        ${CURL_LIBRARIES})
+        ${CURL_LIBRARIES}
+        sqlite3)  # session history (src/session_history_storage.cpp)
 
 # add install prefix to assets path if not already there
 if(NOT SUNSHINE_ASSETS_DIR MATCHES "^${CMAKE_INSTALL_PREFIX}")

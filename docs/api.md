@@ -65,6 +65,24 @@ curl) are not affected.
 ## GET /api/csrf-token
 @copydoc confighttp::getCSRFToken()
 
+## GET /api/history/sessions
+@copydoc confighttp::listSessionHistory()
+
+## GET /api/history/sessions/active
+@copydoc confighttp::getActiveSessionHistory()
+
+## GET /api/history/sessions/{uuid}
+@copydoc confighttp::getSessionHistoryDetail()
+
+## DELETE /api/history/sessions/{uuid}
+@copydoc confighttp::deleteSessionHistory()
+
+## GET /api/host/info
+@copydoc confighttp::getHostInfo()
+
+## GET /api/host/stats
+@copydoc confighttp::getHostStats()
+
 ## GET /api/logs
 @copydoc confighttp::getLogs()
 
@@ -79,6 +97,12 @@ curl) are not affected.
 
 ## POST /api/restart
 @copydoc confighttp::restart()
+
+## GET /api/rtsp/sessions
+@copydoc confighttp::listRTSPSessions()
+
+## GET /api/session/status
+@copydoc confighttp::getSessionStatus()
 
 <div class="section_buttons">
 

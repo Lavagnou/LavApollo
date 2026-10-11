@@ -31,6 +31,7 @@
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
+#include "host_stats.h"
 #include "httpcommon.h"
 #include "log_export.h"
 #include "logging.h"
@@ -38,6 +39,9 @@
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
+#include "rtsp.h"
+#include "session_history.h"
+#include "stream.h"
 #include "utility.h"
 #include "updater.h"
 #include "uuid.h"
@@ -1836,6 +1840,388 @@ namespace confighttp {
     }
   }
 
+  double round_to(double value, double factor) {
+    return std::round(value * factor) / factor;
+  }
+
+  /**
+   * @brief Send a JSON error with the given status.
+   */
+  void send_error(resp_https_t response, SimpleWeb::StatusCode code, const std::string &message) {
+    nlohmann::json tree;
+    tree["status_code"] = static_cast<int>(code);
+    tree["status"] = false;
+    tree["error"] = message;
+    const SimpleWeb::CaseInsensitiveMultimap headers {
+      {"Content-Type", "application/json"},
+      {"X-Frame-Options", "DENY"},
+      {"Content-Security-Policy", "frame-ancestors 'none';"}
+    };
+    response->write(code, tree.dump(), headers);
+  }
+
+  nlohmann::json rtsp_session_to_json(const stream::session_info_t &info) {
+    nlohmann::json output;
+    output["uuid"] = info.uuid;
+    output["device_name"] = info.device_name;
+    output["width"] = info.width;
+    output["height"] = info.height;
+    output["fps"] = info.fps;
+    output["encoder_bitrate_kbps"] = info.encoder_bitrate_kbps;
+    output["requested_bitrate_kbps"] = info.requested_bitrate_kbps;
+    output["video_format"] = info.video_format;
+    output["codec"] = std::string {stream::video_format_name(info.video_format)};
+    output["hdr"] = info.hdr;
+    output["yuv444"] = info.yuv444;
+    output["audio_channels"] = info.audio_channels;
+    output["stream_gpu_model"] = info.stream_gpu_model;
+    output["frames_sent"] = info.frames_sent;
+    output["packets_sent"] = info.packets_sent;
+    output["bytes_sent"] = info.bytes_sent;
+    output["idr_requests"] = info.idr_requests;
+    output["invalidate_ref_count"] = info.invalidate_ref_count;
+    output["client_reported_losses"] = info.client_reported_losses;
+    output["encode_latency_ms"] = round_to(info.encode_latency_ms, 10.0);
+    output["last_frame_index"] = info.last_frame_index;
+    output["uptime_seconds"] = round_to(info.uptime_seconds, 10.0);
+    return output;
+  }
+
+  nlohmann::json host_stats_to_json(const platf::host_stats_t &stats) {
+    nlohmann::json output;
+    output["cpu_percent"] = stats.cpu_percent;
+    output["cpu_temp_c"] = stats.cpu_temp_c;
+    output["ram_used_bytes"] = stats.ram_used_bytes;
+    output["ram_total_bytes"] = stats.ram_total_bytes;
+    output["ram_percent"] = stats.ram_total_bytes > 0 ?
+                              static_cast<double>(stats.ram_used_bytes) * 100.0 / static_cast<double>(stats.ram_total_bytes) :
+                              0.0;
+    output["gpu_percent"] = stats.gpu_percent;
+    output["gpu_encoder_percent"] = stats.gpu_encoder_percent;
+    output["gpu_temp_c"] = stats.gpu_temp_c;
+    const auto vram_used_bytes = stats.vram_total_bytes > 0 && stats.vram_used_bytes > stats.vram_total_bytes ?
+                                   stats.vram_total_bytes :
+                                   stats.vram_used_bytes;
+    output["vram_used_bytes"] = vram_used_bytes;
+    output["vram_total_bytes"] = stats.vram_total_bytes;
+    output["vram_percent"] = stats.vram_total_bytes > 0 ?
+                               static_cast<double>(vram_used_bytes) * 100.0 / static_cast<double>(stats.vram_total_bytes) :
+                               0.0;
+    output["net_rx_bps"] = stats.net_rx_bps;
+    output["net_tx_bps"] = stats.net_tx_bps;
+    return output;
+  }
+
+  nlohmann::json host_info_to_json(const platf::host_info_t &info) {
+    nlohmann::json output;
+    output["cpu_model"] = info.cpu_model;
+    output["gpu_model"] = info.gpu_model;
+    output["cpu_logical_cores"] = info.cpu_logical_cores;
+    output["ram_total_bytes"] = info.ram_total_bytes;
+    output["vram_total_bytes"] = info.vram_total_bytes;
+    output["net_interface"] = info.net_interface;
+    output["net_link_speed_mbps"] = info.net_link_speed_mbps;
+    return output;
+  }
+
+  nlohmann::json session_summary_to_json(const session_history::session_summary_t &summary) {
+    nlohmann::json output;
+    output["uuid"] = summary.uuid;
+    output["protocol"] = summary.protocol;
+    output["client_name"] = summary.client_name;
+    output["device_name"] = summary.device_name;
+    output["app_name"] = summary.app_name;
+    output["width"] = summary.width;
+    output["height"] = summary.height;
+    output["target_fps"] = summary.target_fps;
+    output["encoder_bitrate_kbps"] = summary.encoder_bitrate_kbps;
+    output["requested_bitrate_kbps"] = summary.requested_bitrate_kbps;
+    output["codec"] = summary.codec;
+    output["hdr"] = summary.hdr;
+    output["yuv444"] = summary.yuv444;
+    output["audio_channels"] = summary.audio_channels;
+    output["start_time_unix"] = summary.start_time_unix;
+    output["end_time_unix"] = summary.end_time_unix;
+    output["duration_seconds"] = round_to(summary.duration_seconds, 10.0);
+    output["verdict"] = summary.verdict;
+    output["server_version"] = summary.server_version;
+    output["host_cpu_model"] = summary.host_cpu_model;
+    output["host_gpu_model"] = summary.host_gpu_model;
+    output["stream_gpu_model"] = summary.stream_gpu_model;
+    return output;
+  }
+
+  nlohmann::json session_sample_to_json(const session_history::session_sample_t &sample) {
+    // -1 means "not available on this host", and stays -1 instead of being rounded
+    const auto metric = [](double value) {
+      return value < 0 ? -1.0 : round_to(value, 10.0);
+    };
+    nlohmann::json output;
+    output["session_uuid"] = sample.session_uuid;
+    output["timestamp_unix"] = sample.timestamp_unix;
+    output["bytes_sent_total"] = sample.bytes_sent_total;
+    output["packets_sent_video"] = sample.packets_sent_video;
+    output["frames_sent"] = sample.frames_sent;
+    output["last_frame_index"] = sample.last_frame_index;
+    output["video_dropped"] = sample.video_dropped;
+    output["audio_dropped"] = sample.audio_dropped;
+    output["client_reported_losses"] = sample.client_reported_losses;
+    output["idr_requests"] = sample.idr_requests;
+    output["ref_invalidations"] = sample.ref_invalidations;
+    output["encode_latency_ms"] = round_to(sample.encode_latency_ms, 10.0);
+    output["actual_fps"] = round_to(sample.actual_fps, 10.0);
+    output["actual_bitrate_kbps"] = round_to(sample.actual_bitrate_kbps, 10.0);
+    output["frame_interval_jitter_ms"] = round_to(sample.frame_interval_jitter_ms, 100.0);
+    output["host_cpu_percent"] = metric(sample.host_cpu_percent);
+    output["host_gpu_percent"] = metric(sample.host_gpu_percent);
+    output["host_gpu_encoder_percent"] = metric(sample.host_gpu_encoder_percent);
+    output["host_ram_percent"] = metric(sample.host_ram_percent);
+    output["host_vram_percent"] = metric(sample.host_vram_percent);
+    output["host_cpu_temp_c"] = metric(sample.host_cpu_temp_c);
+    output["host_gpu_temp_c"] = metric(sample.host_gpu_temp_c);
+    output["host_net_rx_bps"] = sample.host_net_rx_bps < 0 ? -1.0 : sample.host_net_rx_bps;
+    output["host_net_tx_bps"] = sample.host_net_tx_bps < 0 ? -1.0 : sample.host_net_tx_bps;
+    return output;
+  }
+
+  nlohmann::json session_event_to_json(const session_history::session_event_t &event) {
+    nlohmann::json output;
+    output["session_uuid"] = event.session_uuid;
+    output["timestamp_unix"] = event.timestamp_unix;
+    output["event_type"] = event.event_type;
+    output["payload"] = event.payload;
+    return output;
+  }
+
+  nlohmann::json active_session_to_json(const session_history::active_session_t &session) {
+    nlohmann::json output;
+    output["uuid"] = session.uuid;
+    output["protocol"] = session.protocol;
+    output["client_name"] = session.client_name;
+    output["device_name"] = session.device_name;
+    output["app_name"] = session.app_name;
+    output["width"] = session.width;
+    output["height"] = session.height;
+    output["target_fps"] = session.target_fps;
+    output["encoder_bitrate_kbps"] = session.encoder_bitrate_kbps;
+    output["requested_bitrate_kbps"] = session.requested_bitrate_kbps;
+    output["codec"] = session.codec;
+    output["hdr"] = session.hdr;
+    output["yuv444"] = session.yuv444;
+    output["stream_gpu_model"] = session.stream_gpu_model;
+    output["uptime_seconds"] = round_to(session.uptime_seconds, 10.0);
+    output["actual_fps"] = round_to(session.actual_fps, 10.0);
+    output["actual_bitrate_kbps"] = round_to(session.actual_bitrate_kbps, 10.0);
+    output["encode_latency_ms"] = round_to(session.encode_latency_ms, 10.0);
+    output["frame_interval_jitter_ms"] = round_to(session.frame_interval_jitter_ms, 100.0);
+    output["frames_sent"] = session.frames_sent;
+    output["bytes_sent"] = session.bytes_sent;
+    output["client_reported_losses"] = session.client_reported_losses;
+    output["idr_requests"] = session.idr_requests;
+    return output;
+  }
+
+  nlohmann::json history_status_to_json(const session_history::history_status_t &status) {
+    nlohmann::json output;
+    output["available"] = status.available;
+    output["degraded"] = status.degraded;
+    output["dropped_samples"] = status.dropped_samples;
+    output["failed_writes"] = status.failed_writes;
+    output["pending_control_commands"] = status.pending_control_commands;
+    output["pending_priority_commands"] = status.pending_priority_commands;
+    output["pending_regular_commands"] = status.pending_regular_commands;
+    output["pending_samples"] = status.pending_samples;
+    return output;
+  }
+
+  /**
+   * @brief Whether an app runs and how many clients stream it, for UI messaging.
+   *
+   * @api_examples{/api/session/status| GET| null}
+   */
+  void getSessionStatus(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+
+    nlohmann::json output_tree;
+    const int active = rtsp_stream::session_count();
+    const bool app_running = proc::proc.running() > 0;
+    output_tree["activeSessions"] = active;
+    output_tree["appRunning"] = app_running;
+    output_tree["appName"] = app_running ? proc::proc.get_last_run_app_name() : "";
+    output_tree["paused"] = app_running && active == 0;
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Live host load: CPU, GPU, encoder, memory, temperatures, network (-1: not available).
+   *
+   * @api_examples{/api/host/stats| GET| null}
+   */
+  void getHostStats(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    send_response(response, host_stats_to_json(host_stats::latest_for_consumer()));
+  }
+
+  /**
+   * @brief The host's CPU and GPU models and memory sizes, sampled once.
+   *
+   * @api_examples{/api/host/info| GET| null}
+   */
+  void getHostInfo(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    send_response(response, host_info_to_json(host_stats::info()));
+  }
+
+  /**
+   * @brief Running video sessions with their live counters.
+   *
+   * @api_examples{/api/rtsp/sessions| GET| null}
+   */
+  void listRTSPSessions(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    nlohmann::json output;
+    output["sessions"] = nlohmann::json::array();
+    for (const auto &info : stream::get_all_session_info()) {
+      output["sessions"].push_back(rtsp_session_to_json(info));
+    }
+    send_response(response, output);
+  }
+
+  /**
+   * @brief Recorded sessions, newest first. Query: `limit` (1-100, default 25), `offset`.
+   *
+   * @api_examples{/api/history/sessions| GET| null}
+   */
+  void listSessionHistory(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    int limit = 25;
+    int offset = 0;
+    const auto query = request->parse_query_string();
+    if (const auto it = query.find("limit"); it != query.end()) {
+      try {
+        limit = std::stoi(it->second);
+      } catch (...) {}
+    }
+    if (const auto it = query.find("offset"); it != query.end()) {
+      try {
+        offset = std::stoi(it->second);
+      } catch (...) {}
+    }
+    limit = std::clamp(limit, 1, 100);
+    offset = std::max(offset, 0);
+
+    nlohmann::json output;
+    output["sessions"] = nlohmann::json::array();
+    for (const auto &summary : session_history::list_sessions(limit, offset)) {
+      output["sessions"].push_back(session_summary_to_json(summary));
+    }
+    output["history_status"] = history_status_to_json(session_history::get_history_status());
+    send_response(response, output);
+  }
+
+  /**
+   * @brief One recorded session with its samples and events. Query: `full=1` for every sample.
+   *
+   * @api_examples{/api/history/sessions/{uuid}| GET| null}
+   */
+  void getSessionHistoryDetail(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    const auto uuid = request->path_match[1].str();
+    const auto query = request->parse_query_string();
+    const auto full = query.find("full");
+    const bool include_all = full != query.end() && (full->second == "1" || full->second == "true");
+
+    const auto detail = session_history::get_session_detail(uuid, include_all);
+    if (!detail) {
+      not_found(response, request);
+      return;
+    }
+
+    nlohmann::json output = session_summary_to_json(detail->summary);
+    output["total_samples"] = detail->total_samples;
+    output["total_events"] = detail->total_events;
+    output["samples_truncated"] = detail->samples_truncated;
+    output["events_truncated"] = detail->events_truncated;
+    output["samples"] = nlohmann::json::array();
+    for (const auto &sample : detail->samples) {
+      output["samples"].push_back(session_sample_to_json(sample));
+    }
+    output["events"] = nlohmann::json::array();
+    for (const auto &event : detail->events) {
+      output["events"].push_back(session_event_to_json(event));
+    }
+    output["history_status"] = history_status_to_json(session_history::get_history_status());
+    send_response(response, output);
+  }
+
+  /**
+   * @brief Delete one ended session from the history.
+   *
+   * @api_examples{/api/history/sessions/{uuid}| DELETE| null}
+   */
+  void deleteSessionHistory(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    const auto uuid = request->path_match[1].str();
+    switch (session_history::delete_session(uuid)) {
+      case session_history::delete_result_e::deleted:
+        break;
+      case session_history::delete_result_e::not_found:
+        not_found(response, request);
+        return;
+      case session_history::delete_result_e::active_session:
+        send_error(response, SimpleWeb::StatusCode::client_error_conflict, "Cannot delete a session that is still streaming");
+        return;
+      case session_history::delete_result_e::timeout:
+        send_error(response, SimpleWeb::StatusCode::server_error_gateway_timeout, "Timed out waiting for the session history");
+        return;
+      case session_history::delete_result_e::unavailable:
+      case session_history::delete_result_e::failed:
+        send_error(response, SimpleWeb::StatusCode::server_error_service_unavailable, "Session history unavailable");
+        return;
+    }
+
+    nlohmann::json output;
+    output["status"] = true;
+    output["uuid"] = uuid;
+    send_response(response, output);
+  }
+
+  /**
+   * @brief Sessions being recorded right now, with their latest computed metrics.
+   *
+   * @api_examples{/api/history/sessions/active| GET| null}
+   */
+  void getActiveSessionHistory(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    nlohmann::json output;
+    output["sessions"] = nlohmann::json::array();
+    for (const auto &session : session_history::get_active_sessions()) {
+      output["sessions"].push_back(active_session_to_json(session));
+    }
+    send_response(response, output);
+  }
+
   /**
    * @brief Trade the refresh cookie for a new pair of login cookies.
    * @details What the web UI calls when an API request returns 401, before retrying it once.
@@ -2009,6 +2395,14 @@ namespace confighttp {
     server.resource["^/api/auth/sessions$"]["GET"] = getSessions;
     server.resource["^/api/auth/sessions/([A-Za-z0-9]+)$"]["DELETE"] = revokeSession;
     server.resource["^/api/csrf-token$"]["GET"] = getCSRFToken;
+    server.resource["^/api/session/status$"]["GET"] = getSessionStatus;
+    server.resource["^/api/host/stats$"]["GET"] = getHostStats;
+    server.resource["^/api/host/info$"]["GET"] = getHostInfo;
+    server.resource["^/api/rtsp/sessions$"]["GET"] = listRTSPSessions;
+    server.resource["^/api/history/sessions$"]["GET"] = listSessionHistory;
+    server.resource["^/api/history/sessions/active$"]["GET"] = getActiveSessionHistory;
+    server.resource["^/api/history/sessions/([A-Fa-f0-9-]+)$"]["GET"] = getSessionHistoryDetail;
+    server.resource["^/api/history/sessions/([A-Fa-f0-9-]+)$"]["DELETE"] = deleteSessionHistory;
     server.resource["^/api/pin$"]["POST"] = savePin;
     server.resource["^/api/otp$"]["POST"] = getOTP;
     server.resource["^/api/apps$"]["GET"] = getApps;

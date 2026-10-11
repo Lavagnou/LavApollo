@@ -26,6 +26,7 @@ extern "C" {
 #include "crypto.h"
 #include "display_device.h"
 #include "globals.h"
+#include "host_stats.h"
 #include "input.h"
 #include "logging.h"
 #include "network.h"
@@ -33,6 +34,8 @@ extern "C" {
 #include "process.h"
 #include "pyrowave_policy.h"
 #include "pyrowave_protocol.h"
+#include "rtsp.h"
+#include "session_history.h"
 #include "stream.h"
 
 #ifdef _WIN32
@@ -43,6 +46,7 @@ extern "C" {
 #include "system_tray.h"
 #include "thread_safe.h"
 #include "utility.h"
+#include "uuid.h"
 
 #define IDX_START_A 0
 #define IDX_START_B 1
@@ -471,6 +475,24 @@ namespace stream {
     safe::signal_t controlEnd;
 
     std::atomic<session::state_e> state;
+
+    // Session history (session_history.h): this session's id there, distinct from the client's UUID
+    // since one client streams many sessions.
+    std::string history_uuid;
+
+    // Counters read by the session history sampler and the live stats, written by the broadcast and
+    // control threads.
+    struct {
+      std::atomic<std::uint64_t> frames_sent {0};
+      std::atomic<std::uint64_t> packets_sent {0};
+      std::atomic<std::uint64_t> bytes_sent {0};
+      std::atomic<std::uint32_t> idr_requests {0};
+      std::atomic<std::uint32_t> invalidate_ref_count {0};
+      std::atomic<std::int64_t> client_reported_losses {0};
+      std::atomic<std::uint16_t> last_encode_latency_us10 {0};  ///< In 1/10 ms, as sent to the client
+      std::atomic<std::int64_t> last_frame_index {0};
+      std::chrono::steady_clock::time_point start_time {std::chrono::steady_clock::now()};
+    } stats;
   };
 
   /**
@@ -998,6 +1020,10 @@ namespace stream {
 
       auto lastGoodFrame = stats[3];
 
+      if (count > 0) {
+        session->stats.client_reported_losses.fetch_add(count, std::memory_order_relaxed);
+      }
+
       // Update the per-session loss statistics so other parts of the stream
       // can react to network conditions instead of streaming blindly.
       auto now = std::chrono::steady_clock::now();
@@ -1110,6 +1136,7 @@ namespace stream {
     server->map(packetTypes[IDX_REQUEST_IDR_FRAME], [&](session_t *session, const std::string_view &payload) {
       BOOST_LOG(debug) << "type [IDX_REQUEST_IDR_FRAME]"sv;
 
+      session->stats.idr_requests.fetch_add(1, std::memory_order_relaxed);
       session->video.idr_events->raise(true);
     });
 
@@ -1117,6 +1144,8 @@ namespace stream {
       auto frames = (std::int64_t *) payload.data();
       auto firstFrame = frames[0];
       auto lastFrame = frames[1];
+
+      session->stats.invalidate_ref_count.fetch_add(1, std::memory_order_relaxed);
 
       BOOST_LOG(debug)
         << "type [IDX_INVALIDATE_REF_FRAMES]"sv << std::endl
@@ -1579,8 +1608,10 @@ namespace stream {
         uint16_t latency = duration_to_latency(std::chrono::steady_clock::now() - *packet->frame_timestamp);
         frame_header.frame_processing_latency = latency;
         frame_processing_latency_logger.collect_and_log(latency / 10.);
+        session->stats.last_encode_latency_us10.store(latency, std::memory_order_relaxed);
       } else {
         frame_header.frame_processing_latency = 0;
+        session->stats.last_encode_latency_us10.store(0, std::memory_order_relaxed);
       }
 
       // PyroWave ignores fec_percentage and adaptive FEC: only its critical packets get
@@ -1944,9 +1975,16 @@ namespace stream {
           ++blockIndex;
           lowseq += shards.size();
           session->video.packets_sent.fetch_add(shards.size(), std::memory_order_relaxed);
+          session->stats.packets_sent.fetch_add(shards.size(), std::memory_order_relaxed);
+          session->stats.bytes_sent.fetch_add(
+            shards.size() * (blocksize + (session->video.cipher ? sizeof(video_packet_enc_prefix_t) : 0)),
+            std::memory_order_relaxed
+          );
         });
 
         session->video.lowseq = lowseq;
+        session->stats.frames_sent.fetch_add(1, std::memory_order_relaxed);
+        session->stats.last_frame_index.store(packet->frame_index(), std::memory_order_relaxed);
       } catch (const std::exception &e) {
         BOOST_LOG(error) << "Broadcast video failed "sv << e.what();
         std::this_thread::sleep_for(100ms);
@@ -2386,6 +2424,11 @@ namespace stream {
       session.audioThread.join();
       BOOST_LOG(debug) << "Waiting for control to end..."sv;
       session.controlEnd.view();
+
+      if (!session.config.monitor.input_only) {
+        session_history::end_session(session.history_uuid);
+        host_stats::rtsp_session_ended();
+      }
       // Reset input on session stop to avoid stuck repeated keys
       BOOST_LOG(debug) << "Resetting Input..."sv;
       input::reset(session.input);
@@ -2471,6 +2514,28 @@ namespace stream {
 
       session.state.store(state_e::RUNNING, std::memory_order_relaxed);
 
+      // An input-only session streams no video: nothing to chart
+      if (!session.config.monitor.input_only) {
+        session_history::session_metadata_t meta;
+        meta.uuid = session.history_uuid;
+        meta.protocol = "rtsp";
+        meta.client_name = session.device_name;
+        meta.device_name = session.device_name;
+        meta.app_name = session.config.monitor.capture_output.empty() ? proc::proc.get_last_run_app_name() : std::string {"Remote Monitor"};
+        meta.width = session.config.monitor.width;
+        meta.height = session.config.monitor.height;
+        meta.target_fps = session.config.monitor.framerate;
+        meta.encoder_bitrate_kbps = session.config.monitor.bitrate;
+        meta.requested_bitrate_kbps = session.config.monitor.bitrate;
+        meta.codec = std::string {video_format_name(session.config.monitor.videoFormat)};
+        meta.hdr = session.config.monitor.dynamicRange != 0;
+        meta.yuv444 = session.config.monitor.chromaSamplingType != 0;
+        meta.audio_channels = session.config.audio.input_only ? 0 : session.config.audio.channels;
+        meta.server_version = PROJECT_VERSION;
+        session_history::begin_session(meta);
+        host_stats::rtsp_session_started();
+      }
+
       // If this is the first session, invoke the platform callbacks
       if (++running_sessions == 1) {
         platf::streaming_will_start();
@@ -2526,6 +2591,7 @@ namespace stream {
 
     std::shared_ptr<session_t> alloc(config_t &config, rtsp_stream::launch_session_t &launch_session) {
       auto session = std::make_shared<session_t>();
+      session->history_uuid = uuid_util::uuid_t::generate().string();
 
       auto mail = std::make_shared<safe::mail_raw_t>();
 
@@ -2609,4 +2675,40 @@ namespace stream {
       return session;
     }
   }  // namespace session
+  std::vector<session_info_t> get_all_session_info() {
+    std::vector<session_info_t> result;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto &session : rtsp_stream::get_sessions_snapshot()) {
+      if (!session || session->config.monitor.input_only ||
+          session->state.load(std::memory_order_relaxed) != session::state_e::RUNNING) {
+        continue;
+      }
+
+      const auto &monitor = session->config.monitor;
+      session_info_t info {};
+      info.uuid = session->history_uuid;
+      info.device_name = session->device_name;
+      info.width = monitor.width;
+      info.height = monitor.height;
+      info.fps = monitor.framerate;
+      info.encoder_bitrate_kbps = monitor.bitrate;
+      info.requested_bitrate_kbps = monitor.bitrate;
+      info.video_format = monitor.videoFormat;
+      info.hdr = monitor.dynamicRange != 0;
+      info.yuv444 = monitor.chromaSamplingType != 0;
+      info.audio_channels = session->config.audio.input_only ? 0 : session->config.audio.channels;
+
+      info.frames_sent = session->stats.frames_sent.load(std::memory_order_relaxed);
+      info.packets_sent = session->stats.packets_sent.load(std::memory_order_relaxed);
+      info.bytes_sent = session->stats.bytes_sent.load(std::memory_order_relaxed);
+      info.idr_requests = session->stats.idr_requests.load(std::memory_order_relaxed);
+      info.invalidate_ref_count = session->stats.invalidate_ref_count.load(std::memory_order_relaxed);
+      info.client_reported_losses = session->stats.client_reported_losses.load(std::memory_order_relaxed);
+      info.encode_latency_ms = session->stats.last_encode_latency_us10.load(std::memory_order_relaxed) / 10.0;
+      info.last_frame_index = session->stats.last_frame_index.load(std::memory_order_relaxed);
+      info.uptime_seconds = std::chrono::duration<double>(now - session->stats.start_time).count();
+      result.push_back(std::move(info));
+    }
+    return result;
+  }
 }  // namespace stream

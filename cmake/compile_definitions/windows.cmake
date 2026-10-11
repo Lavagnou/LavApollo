@@ -91,6 +91,7 @@ set(PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/windows/ipc/process_handler.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/host_stats.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/vhf_gamepad.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/vhf_gamepad.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/vhf_gamepad_policy.h"
@@ -122,9 +123,11 @@ list(PREPEND PLATFORM_LIBRARIES
         ksuser
         libssp.a
         libstdc++.a
+        libsqlite3.a  # session history (src/session_history_storage.cpp), static like the C++ runtime
         libwinpthread.a
         minhook::minhook
         ntdll
+        pdh  # host stats (src/platform/windows/host_stats.cpp)
         setupapi
         shlwapi
         synchronization.lib

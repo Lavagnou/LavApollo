@@ -23,6 +23,7 @@
 
 // local includes
 #include "src/config.h"
+#include "src/host_stats_types.h"
 #include "src/logging.h"
 #include "src/thread_safe.h"
 #include "src/utility.h"
@@ -942,5 +943,12 @@ namespace platf {
 
   bool
   set_clipboard(const std::string& content);
+
+  /**
+   * @brief The platform's host statistics source (CPU, GPU, memory, network).
+   * @details Always returns a usable provider; where there is no real one, its samples are empty.
+   */
+  std::unique_ptr<host_stats_provider_t>
+  create_host_stats_provider();
 
 }  // namespace platf

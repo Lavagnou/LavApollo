@@ -106,6 +106,7 @@ dependencies=(
   "mingw-w64-ucrt-x86_64-onevpl"
   "mingw-w64-ucrt-x86_64-openssl"
   "mingw-w64-ucrt-x86_64-opus"
+  "mingw-w64-ucrt-x86_64-sqlite3"  # Session history, linked statically
   "mingw-w64-ucrt-x86_64-toolchain"
   "mingw-w64-ucrt-x86_64-nlohmann_json"
 )
