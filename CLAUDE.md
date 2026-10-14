@@ -19,17 +19,42 @@ still `sunshine`. Don't "fix" these unless asked.
 The value of this fork over upstream Apollo lives in the streaming path (see `git log` before
 `adc5c5a0`, which is the last upstream commit):
 
-- **Adaptive FEC** (`config.adaptive_fec`, default on) — FEC percentage is driven per-frame by
-  client-reported loss instead of being fixed; carried in the protocol's `fecInfo` field.
-- **Adaptive bitrate** (`config.adaptive_bitrate`, default on) — when FEC is exhausted and loss
-  persists, the encoder bitrate is cut and later restored. Implemented via `encode_session_t::update_bitrate()`
-  and `NvEncReconfigureEncoder` (rate control only, no encoder reset / IDR), signalled from the control
-  thread to the encoder thread through the `mail::bitrate_change` event.
+- **Adaptive FEC** (`config.adaptive_fec`, default on) and **adaptive bitrate**
+  (`config.adaptive_bitrate`, default on), decided by `stream::adaptive_controller_t`
+  (`src/stream_adaptive.{h,cpp}`: pure logic, no session or clock, unit-tested).
+  - ⚠️ **The input is the client's per-frame FEC report, `SS_FRAME_FEC_STATUS` (control type
+    `0x5502`, big-endian, 21 bytes)**, sent only for frames that needed FEC or were lost. The first
+    version listened to loss stats (`0x0201`) instead, which moonlight-common-c never sends to a
+    Sunshine host (it switches to periodic pings from appversion 7.1.415; the `0x0201` branch asserts
+    `!IS_SUNSHINE()`), so both features silently did nothing. `0x0201` is now logged only.
+  - IDR and reference-frame-invalidation requests also count as lost frames.
+  - Repaired losses do not raise FEC; lost frames and *near misses* (repaired with more than half the
+    parity) do. FEC +10 after two troubled 1 s windows, −5 after 10 quiet seconds, between
+    `min(fec_percentage, 10)` and `max(fec_percentage, 55)`. FEC is sent **on top of** the video
+    bitrate (Sunshine's behaviour, deliberate).
+  - Bitrate −20% only when frames are still lost with FEC at its ceiling, +10% of negotiated after
+    15 quiet seconds. Applied through `encode_session_t::update_bitrate()` →
+    `NvEncReconfigureEncoder` (rate control only, no reset / IDR) via `mail::bitrate_change`. **Only
+    the standalone NVENC session on Windows implements it**; `video::encoder_supports_bitrate_change()`
+    tells the controller up front, so other encoders adapt FEC only.
+  - `videoBroadcastThread` asks the controller for each frame's FEC; the control thread feeds it.
+  - ⚠️ **No controller for PyroWave sessions** (`session::alloc()`): their FEC stays 0 apart from the
+    critical-packet parity, the bitrate never adapts, and an overflow drops frames without asking
+    for an IDR, since every PyroWave frame is intra.
+  - The `0x5502` handler also feeds the session history: each frame the client could not rebuild
+    adds one to `session_t::stats.client_reported_losses`, for every session. `0x0201` used to feed
+    that counter and so left it at 0 for every Sunshine client.
+    Both go through `session->video.adaptive_mutex`.
 - **Emulated multi-display** — a client can send `displayLayout=` on `/launch` (`x,y,w,h,primary`
   per display, in the coordinate space of the `mode=` it already sends) and get one virtual display
   per monitor instead of one big one. `launch_session_t` carries a `std::vector<virtual_display_t>`;
   a single-display client just gets a one-element list, so creation, arrangement and teardown have
   one code path. Advertised to clients as `MultiDisplayCapable` in `serverinfo`.
+  - ⚠️ `displayLayout=` is untrusted input: `nvhttp::parse_display_layout()` (portable, tested in
+    `tests/unit/test_display_layout.cpp`) parses with `std::from_chars` and caps every field at
+    `MAX_LAYOUT_COORDINATE` (16384) *before* any addition — `atoi` + `x + width` used to overflow.
+  - If a display fails to come up **or** Windows refuses the arrangement, the session falls back to
+    one display covering the whole canvas (`fall_back_to_single_display` in `process.cpp`).
   - `VDISPLAY::applyVirtualDisplayLayout()` places them in **one** `SetDisplayConfig` call —
     moving them one at a time passes through overlapping arrangements, which Windows refuses.
     ⚠️ It sets only their positions **relative to each other**; the block as a whole stays where it
@@ -97,7 +122,8 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
   driver is pointed at `adapter_name`, or at the GPU with the **most dedicated memory** when none is
   set -- otherwise a hybrid laptop could render on the iGPU and encode on the dGPU.
 - Send pacing derived from the negotiated stream bitrate rather than a hardcoded 800 Mbps.
-- Video queue drops the oldest frames on overflow instead of flushing.
+- Video queue drops the oldest frames on overflow instead of flushing, and requests an IDR at most
+  every 500 ms while it does (one per dropped frame turned sustained overflow into an IDR storm).
 - Higher NVENC quality defaults (P4 preset, spatial AQ).
 - **PyroWave codec** (`config.pyrowave`, default on; `videoFormat`/`bitStreamFormat` 3) — see below.
 
@@ -289,6 +315,9 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
       `/api/auth/refresh` once, shared by concurrent calls (two refreshes in flight would spend the same
       cookie), then retries. If the refresh fails, it sends the browser to the login page.
   - `savePassword` revokes every login.
+  - From the 3rd failed login, the address is locked out for 1 s, 2 s, 4 s… up to 30 s (`login_lockout_remaining()`,
+    a bounded in-memory table). This covers `/api/login` and its v2 alias `/api/auth/login`, which is
+    the same handler. A success clears the address.
   - ⚠️ **CSRF**: `start()` wraps **every** POST/PUT/PATCH/DELETE route in `check_csrf()` after
     registration, so routes added later are covered too. A request passes when:
     - it has no `Origin` and no `Referer` (scripts);
@@ -445,4 +474,27 @@ through Crowdin (`crowdin.yml`); only edit `public/assets/locale/en.json`.
 ## Release
 
 `.github/workflows/release.yml` builds the Windows installer + portable zip and publishes a GitHub
-release, triggered by pushing a `v*` tag or by manual dispatch with a version input.
+release, triggered by pushing a `v*` tag or by manual dispatch with a version input. There is no CI
+test job: run `test_sunshine` locally.
+
+### In-app updater (`src/updater.cpp`, Web UI home page)
+
+- ⚠️ **The staged installer runs elevated and silent**, so it is staged in an `updates` folder next
+  to the executable, recreated per download with a SYSTEM + Administrators DACL, under a random name
+  — never `%TEMP%`, which any local user can write to. Right before `runas`, the file is opened
+  without write/delete sharing and hashed again through that handle.
+- The release's `LavApollo-<version>-SHA256SUMS.txt` is **mandatory**: no checksum, no install.
+- `PUBLISHER_THUMBPRINT` is empty while releases are unsigned. Filling it in (with signtool in
+  `release.yml`) makes the Authenticode check in `verify_publisher()` mandatory.
+- Staged installers are deleted at the next startup (`cleanup_staged_installers()`): the process
+  that launches the installer is the one being replaced.
+- The Web UI's POSTs must send `Content-Type: application/json` (CSRF guard in
+  `validateContentType()`); without it the endpoints answer 400.
+
+### Startup
+
+mDNS/UPnP advertising waits for the HTTP, HTTPS and RTSP servers to report a successful bind
+(`net::report_streaming_bind()`), not just for the pre-flight port probe. The probe uses
+`SO_EXCLUSIVEADDRUSE` on Windows, where `SO_REUSEADDR` would let it bind a port another process
+is using. Failed Web UI logins lock the address out for 1 s, 2 s, 4 s… up to 30 s after three
+misses (the Web UI runs on a single thread, so the handler never sleeps).

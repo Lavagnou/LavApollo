@@ -15,12 +15,15 @@
 #include <atomic>
 #include <chrono>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
+#include <random>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 
 // lib includes
@@ -30,35 +33,53 @@
 // local includes
 #include "httpcommon.h"
 #include "logging.h"
+#include "platform/common.h"
 #include "updater.h"
+#include "utility.h"
 
 #ifdef _WIN32
+  // clang-format off
   #include <windows.h>
+  #include <sddl.h>
   #include <shellapi.h>
+  #include <shlobj.h>
+  #include <softpub.h>
+  #include <wincrypt.h>
+  #include <wintrust.h>
+  // clang-format on
 #endif
 
 namespace updater {
   using namespace std::literals;
+  using namespace detail;
 
   namespace {
     constexpr auto LATEST_RELEASE_URL = "https://api.github.com/repos/Lavagnou/LavApollo/releases/latest";
     constexpr auto REPO_HOME = "https://github.com/Lavagnou/LavApollo";
-    // Staged installer file name (written under the OS temp directory).
-    constexpr auto STAGING_FILENAME = "lavapollo-update.exe";
+    // Staged installers are named "<prefix><random>.exe" inside staging_directory().
+    constexpr auto STAGING_PREFIX = "lavapollo-update-";
+    // Where releases before the hardening staged their installer: a fixed name in the service's
+    // %TEMP%, which every local user can write to. Removed on startup.
+    constexpr auto LEGACY_STAGING_FILENAME = "lavapollo-update.exe";
+
+    /**
+     * SHA-1 thumbprint (uppercase hex, no spaces) of the certificate LavApollo installers are
+     * Authenticode-signed with. Empty while releases are unsigned: verify_publisher() then accepts
+     * any file and the SHA-256 from the release's SHA256SUMS is the only integrity check.
+     *
+     * Fill it in the day a code-signing certificate exists (and signtool runs in release.yml), and
+     * the installer will refuse to launch anything not signed by that exact certificate.
+     */
+    constexpr std::string_view PUBLISHER_THUMBPRINT = "";
     // How long a successful check_for_update() result is reused without re-hitting GitHub.
     constexpr auto CHECK_CACHE_TTL = std::chrono::minutes(10);
 
     // Pattern matched against GitHub release asset names to pick the Windows installer.
     constexpr auto INSTALLER_SUFFIX = "-Windows-installer.exe";
 
-    /// Parsed semantic version (major.minor.patch); prerelease/build metadata is ignored.
-    struct semver_t {
-      int major = 0;
-      int minor = 0;
-      int patch = 0;
-      bool valid = false;
-    };
+  }  // namespace
 
+  namespace detail {
     semver_t
     parse_semver(const std::string &s) {
       semver_t v;
@@ -69,25 +90,30 @@ namespace updater {
       if (auto pos = core.find('-'); pos != std::string::npos) core.erase(pos);  // drop prerelease
       if (auto pos = core.find('+'); pos != std::string::npos) core.erase(pos);  // drop build metadata
 
+      // Exactly major.minor.patch, each a non-empty run of digits that fits an int. Anything
+      // looser ("1", "1..2", "1.2.3.", "1.2.3.4") is not a version we know how to compare, and
+      // a malformed release tag must not read as an update.
       int parts[3] = {0, 0, 0};
-      int idx = 0;
-      std::string num;
-      auto flush = [&]() {
-        if (idx < 3 && !num.empty()) parts[idx++] = std::atoi(num.c_str());
-        num.clear();
-      };
-      for (char c : core) {
-        if (c == '.') {
-          flush();
+      std::string_view rest {core};
+      for (int i = 0; i < 3; ++i) {
+        auto dot = rest.find('.');
+        auto field = rest.substr(0, dot);
+        if (field.empty() || !std::all_of(field.begin(), field.end(), [](unsigned char c) { return std::isdigit(c); })) {
+          return v;
         }
-        else if (std::isdigit(static_cast<unsigned char>(c))) {
-          num += c;
+        auto [end, ec] = std::from_chars(field.data(), field.data() + field.size(), parts[i]);
+        if (ec != std::errc {} || end != field.data() + field.size()) {
+          return v;
         }
-        else {
-          return v;  // unexpected character → not a clean numeric version
+        if (i < 2) {
+          if (dot == std::string_view::npos) {
+            return v;
+          }
+          rest.remove_prefix(dot + 1);
+        } else if (dot != std::string_view::npos) {
+          return v;
         }
       }
-      flush();
       v.major = parts[0];
       v.minor = parts[1];
       v.patch = parts[2];
@@ -102,26 +128,35 @@ namespace updater {
       if (a.minor != b.minor) return a.minor > b.minor;
       return a.patch > b.patch;
     }
+  }  // namespace detail
 
-    /// SHA-256 of a file as a lowercase hex string, or empty on error.
+  namespace {
+
+    /**
+     * SHA-256 of everything `read_chunk` yields, as a lowercase hex string, or empty on error.
+     * `read_chunk(buf, size)` returns the bytes read, 0 at end of input, or -1 on error.
+     */
+    template<class F>
     std::string
-    sha256_file(const std::string &path) {
-      FILE *fp = fopen(path.c_str(), "rb");  // NOSONAR
-      if (!fp) return {};
-
+    sha256_stream(F &&read_chunk) {
       EVP_MD_CTX *ctx = EVP_MD_CTX_new();
       if (!ctx) {
-        fclose(fp);  // NOSONAR
         return {};
       }
 
       EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
-      unsigned char buf[65536];
-      size_t n;
-      while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
-        EVP_DigestUpdate(ctx, buf, n);
+      static thread_local unsigned char buf[65536];
+      while (true) {
+        auto n = read_chunk(buf, sizeof(buf));
+        if (n < 0) {
+          EVP_MD_CTX_free(ctx);
+          return {};
+        }
+        if (n == 0) {
+          break;
+        }
+        EVP_DigestUpdate(ctx, buf, (size_t) n);
       }
-      fclose(fp);  // NOSONAR
 
       unsigned char md[EVP_MAX_MD_SIZE];
       unsigned int md_len = 0;
@@ -138,7 +173,190 @@ namespace updater {
       return hex;
     }
 
-    /// Extract the expected hash for `installer_name` from a sha256sums file body.
+    /// SHA-256 of a file as a lowercase hex string, or empty on error.
+    std::string
+    sha256_file(const std::string &path) {
+      FILE *fp = fopen(path.c_str(), "rb");  // NOSONAR
+      if (!fp) return {};
+
+      auto hex = sha256_stream([fp](unsigned char *buf, size_t size) -> long long {
+        auto n = fread(buf, 1, size, fp);
+        if (n == 0 && ferror(fp)) return -1;
+        return (long long) n;
+      });
+      fclose(fp);  // NOSONAR
+      return hex;
+    }
+
+    bool
+    equal_hex(std::string a, std::string b) {
+      auto lower = [](std::string &s) {
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char) std::tolower(c); });
+      };
+      lower(a);
+      lower(b);
+      return !a.empty() && a == b;
+    }
+
+    /**
+     * The `updates` folder next to the executable (Windows), or under the config directory.
+     * Not created here. On failure `ec` is set and the path is empty.
+     */
+    std::filesystem::path
+    updates_directory(std::error_code &ec) {
+#ifdef _WIN32
+      // Grown until the whole path fits: MAX_PATH is not a limit on install locations, and a
+      // truncated path would put the staging folder somewhere else entirely.
+      std::wstring exe_path(MAX_PATH, L'\0');
+      while (true) {
+        DWORD len = GetModuleFileNameW(nullptr, exe_path.data(), (DWORD) exe_path.size());
+        if (len == 0) {
+          ec = std::error_code((int) GetLastError(), std::system_category());
+          return {};
+        }
+        if (len < exe_path.size()) {
+          exe_path.resize(len);
+          break;
+        }
+        if (exe_path.size() >= 32768) {
+          ec = std::make_error_code(std::errc::filename_too_long);
+          return {};
+        }
+        exe_path.resize(exe_path.size() * 2);
+      }
+      return std::filesystem::path {exe_path}.remove_filename() / L"updates";
+#else
+      return platf::appdata() / "updates";
+#endif
+    }
+
+    /**
+     * Directory the installer is downloaded into, created if needed.
+     *
+     * On Windows this is an `updates` folder next to the executable -- under Program Files for
+     * any real install, which ordinary users cannot write to -- created with a protected DACL
+     * granting full control to SYSTEM and Administrators only. It used to be the service's
+     * %TEMP% (C:\Windows\Temp), where any local user can create files: they could pre-create
+     * the staged installer, wait for it to be verified, then swap it for their own program and
+     * have the admin launch it elevated.
+     *
+     * An existing directory is removed and created again, so the DACL in force is always the
+     * one set here, never one left behind by whoever made the folder first.
+     */
+    std::filesystem::path
+    staging_directory(std::error_code &ec) {
+#ifdef _WIN32
+      auto dir = updates_directory(ec);
+      if (ec) {
+        return {};
+      }
+
+      std::filesystem::remove_all(dir, ec);
+      if (ec) {
+        return {};
+      }
+
+      PSECURITY_DESCRIPTOR sd = nullptr;
+      // P = protected (no inherited ACEs), OICI = inherited by the files we write into it.
+      if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", SDDL_REVISION_1, &sd, nullptr
+          )) {
+        ec = std::error_code((int) GetLastError(), std::system_category());
+        return {};
+      }
+
+      SECURITY_ATTRIBUTES sa {sizeof(sa), sd, FALSE};
+      BOOL created = CreateDirectoryW(dir.c_str(), &sa);
+      DWORD err = GetLastError();
+      LocalFree(sd);
+
+      if (!created) {
+        // ERROR_ALREADY_EXISTS here means someone recreated it between the removal and now.
+        ec = std::error_code((int) err, std::system_category());
+        return {};
+      }
+      return dir;
+#else
+      auto dir = updates_directory(ec);
+      if (ec) {
+        return {};
+      }
+      std::filesystem::create_directories(dir, ec);
+      return ec ? std::filesystem::path {} : dir;
+#endif
+    }
+
+    /// Random, unguessable file name for one staged installer.
+    std::string
+    random_staging_name() {
+      std::random_device rd;
+      std::ostringstream name;
+      name << STAGING_PREFIX << std::hex << rd() << rd() << ".exe";
+      return name.str();
+    }
+
+#ifdef _WIN32
+    /**
+     * Check that `path` carries a valid Authenticode signature from PUBLISHER_THUMBPRINT.
+     * Accepts everything while no thumbprint is configured (unsigned releases).
+     */
+    bool
+    verify_publisher(const std::filesystem::path &path, std::string &why) {
+      if (PUBLISHER_THUMBPRINT.empty()) {
+        return true;
+      }
+
+      WINTRUST_FILE_INFO file_info {};
+      file_info.cbStruct = sizeof(file_info);
+      file_info.pcwszFilePath = path.c_str();
+
+      GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+      WINTRUST_DATA trust {};
+      trust.cbStruct = sizeof(trust);
+      trust.dwUIChoice = WTD_UI_NONE;
+      trust.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
+      trust.dwUnionChoice = WTD_CHOICE_FILE;
+      trust.pFile = &file_info;
+      trust.dwStateAction = WTD_STATEACTION_VERIFY;
+
+      LONG status = WinVerifyTrust(nullptr, &action, &trust);
+      bool ok = false;
+
+      if (status != ERROR_SUCCESS) {
+        why = "The installer is not validly signed (WinVerifyTrust error " + std::to_string(status) + ").";
+      } else if (auto *prov = WTHelperProvDataFromStateData(trust.hWVTStateData)) {
+        auto *signer = WTHelperGetProvSignerFromChain(prov, 0, FALSE, 0);
+        auto *cert = signer ? WTHelperGetProvCertFromChain(signer, 0) : nullptr;
+
+        BYTE hash[20];
+        DWORD hash_size = sizeof(hash);
+        if (cert && CertGetCertificateContextProperty(cert->pCert, CERT_SHA1_HASH_PROP_ID, hash, &hash_size)) {
+          static const char *digits = "0123456789ABCDEF";
+          std::string thumbprint;
+          for (DWORD i = 0; i < hash_size; ++i) {
+            thumbprint += digits[hash[i] >> 4];
+            thumbprint += digits[hash[i] & 0x0f];
+          }
+          ok = thumbprint == PUBLISHER_THUMBPRINT;
+          if (!ok) {
+            why = "The installer is signed by an unexpected publisher (" + thumbprint + ").";
+          }
+        } else {
+          why = "Could not read the installer's signing certificate.";
+        }
+      } else {
+        why = "Could not read the installer's signature.";
+      }
+
+      trust.dwStateAction = WTD_STATEACTION_CLOSE;
+      WinVerifyTrust(nullptr, &action, &trust);
+      return ok;
+    }
+#endif
+
+  }  // namespace
+
+  namespace detail {
     std::string
     extract_expected_sha(const std::string &sums, const std::string &installer_name) {
       std::istringstream iss(sums);
@@ -148,10 +366,18 @@ namespace updater {
         std::string hash, fname;
         if (!(ls >> hash >> fname)) continue;
         if (!fname.empty() && fname.front() == '*') fname.erase(0, 1);  // binary-mode marker
-        if (fname == installer_name && hash.size() == 64) return hash;
+        if (fname == installer_name && hash.size() == 64 &&
+            std::all_of(hash.begin(), hash.end(), [](unsigned char c) {
+              return std::isxdigit(c);
+            })) {
+          return hash;
+        }
       }
       return {};
     }
+  }  // namespace detail
+
+  namespace {
 
     /// The mutable pipeline state. Atomics for the hot path (progress polling), mutex for the strings.
     struct state_t {
@@ -162,6 +388,7 @@ namespace updater {
       std::string message;          ///< Populated on error (guarded by mutex).
       std::string target_version;   ///< Version being downloaded/applied (guarded by mutex).
       std::string staging_path;     ///< Where the installer was written (guarded by mutex).
+      std::string expected_sha256;  ///< Verified hash, re-checked right before launch (guarded by mutex).
       asset_t asset;                ///< Asset being downloaded (guarded by mutex).
     } g_state;
 
@@ -183,10 +410,19 @@ namespace updater {
     /// Download then verify; runs on a detached thread.
     void
     download_and_verify(version_info_t info) {
-      std::string staging;
+      std::error_code ec;
+      auto dir = staging_directory(ec);
+      if (dir.empty()) {
+        BOOST_LOG(error) << "update: could not prepare the staging directory: "sv << ec.message();
+        set_error("Could not prepare a safe folder for the installer: " + ec.message());
+        return;
+      }
+
+      std::string staging = (dir / random_staging_name()).string();
       {
         std::lock_guard lock(g_state.mutex);
-        staging = g_state.staging_path;
+        g_state.staging_path = staging;
+        g_state.expected_sha256.clear();
       }
 
       auto on_progress = [](std::uint64_t dlnow, std::uint64_t dltotal) {
@@ -209,29 +445,32 @@ namespace updater {
       std::string expected = sums.empty() ? std::string {} : extract_expected_sha(sums, info.asset.name);
 
       if (expected.empty()) {
-        // No checksum available (new naming, transient fetch failure). The download is still
-        // TLS-protected, so log and proceed rather than blocking the update.
-        BOOST_LOG(warning) << "update: could not verify checksum for "sv << info.latest << ", proceeding without"sv;
-      }
-      else {
-        std::string actual = sha256_file(staging);
-        if (actual.empty()) {
-          set_error("Could not read the downloaded installer to verify it.");
-          return;
-        }
-        std::string a = actual;
-        std::string e = expected;
-        std::transform(a.begin(), a.end(), a.begin(), [](unsigned char c) { return std::tolower(c); });
-        std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return std::tolower(c); });
-        if (a != e) {
-          set_error("Installer checksum mismatch — the download may be corrupt. Please try again.");
-          return;
-        }
+        // Nothing to verify against means nothing to vouch for what we are about to run elevated.
+        // Every release since the updater exists publishes the checksum file, so this is either a
+        // transient fetch failure (retry) or a release that should be installed by hand.
+        std::error_code ignored;
+        std::filesystem::remove(staging, ignored);
+        BOOST_LOG(error) << "update: no checksum published for "sv << info.asset.name << ", refusing to stage it"sv;
+        set_error("Could not fetch the installer checksum, so it cannot be verified. Try again, or install the release manually.");
+        return;
       }
 
-      g_state.state.store(state_e::ready, std::memory_order_relaxed);
+      std::string actual = sha256_file(staging);
+      if (actual.empty()) {
+        set_error("Could not read the downloaded installer to verify it.");
+        return;
+      }
+      if (!equal_hex(actual, expected)) {
+        std::error_code ignored;
+        std::filesystem::remove(staging, ignored);
+        set_error("Installer checksum mismatch — the download may be corrupt. Please try again.");
+        return;
+      }
+
       std::lock_guard lock(g_state.mutex);
+      g_state.expected_sha256 = expected;
       g_state.message.clear();
+      g_state.state.store(state_e::ready, std::memory_order_relaxed);
     }
   }  // namespace
 
@@ -332,7 +571,8 @@ namespace updater {
       g_state.message.clear();
       g_state.target_version = info.latest;
       g_state.asset = info.asset;
-      g_state.staging_path = (std::filesystem::temp_directory_path() / STAGING_FILENAME).string();
+      g_state.staging_path.clear();
+      g_state.expected_sha256.clear();
     }
     g_state.downloaded_bytes.store(0, std::memory_order_relaxed);
     g_state.total_bytes.store(info.asset.size, std::memory_order_relaxed);
@@ -356,16 +596,48 @@ namespace updater {
     }
 
     std::string staging;
+    std::string expected;
     {
       std::lock_guard lock(g_state.mutex);
       staging = g_state.staging_path;
+      expected = g_state.expected_sha256;
     }
-    if (staging.empty() || !std::filesystem::exists(staging)) {
+    if (staging.empty() || expected.empty() || !std::filesystem::exists(staging)) {
       set_error("The staged installer is missing. Please download it again.");
       return false;
     }
 
     std::filesystem::path exe(staging);
+
+    // The checksum was verified when the download finished, which can be hours before this
+    // click. Hold the file open without write or delete sharing from here until the process has
+    // been created, and hash it again through that handle: nothing can change or swap it between
+    // the check and the launch.
+    HANDLE lock_handle = CreateFileW(exe.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (lock_handle == INVALID_HANDLE_VALUE) {
+      set_error("Could not open the staged installer (Windows error " + std::to_string(GetLastError()) + "). Please download it again.");
+      return false;
+    }
+    auto close_lock = util::fail_guard([&]() {
+      CloseHandle(lock_handle);
+    });
+
+    auto actual = sha256_stream([lock_handle](unsigned char *buf, size_t size) -> long long {
+      DWORD read = 0;
+      if (!ReadFile(lock_handle, buf, (DWORD) size, &read, nullptr)) return -1;
+      return (long long) read;
+    });
+    if (!equal_hex(actual, expected)) {
+      BOOST_LOG(error) << "update: the staged installer changed after it was verified; refusing to run it"sv;
+      set_error("The staged installer changed after it was verified and was not run. Please download it again.");
+      return false;
+    }
+
+    if (std::string why; !verify_publisher(exe, why)) {
+      BOOST_LOG(error) << "update: "sv << why;
+      set_error(why);
+      return false;
+    }
     SHELLEXECUTEINFOW sei {};
     sei.cbSize = sizeof(sei);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
@@ -417,6 +689,33 @@ namespace updater {
 #else
     return false;
 #endif
+  }
+
+  void
+  cleanup_staged_installers() {
+    std::error_code ec;
+
+    // Releases before the staging hardening left a fixed-name installer in %TEMP%.
+    if (auto tmp = std::filesystem::temp_directory_path(ec); !ec && !tmp.empty()) {
+      std::filesystem::remove(tmp / LEGACY_STAGING_FILENAME, ec);
+    }
+
+    auto dir = updates_directory(ec);
+    if (ec) {
+      BOOST_LOG(warning) << "update: cannot locate the staging folder to clean it: "sv << ec.message();
+      return;
+    }
+    // Anything here was either installed already (we are the new version) or abandoned. The
+    // process that launched the installer is the one being replaced, so it cannot clean up after
+    // itself; its successor does it here.
+    auto removed = std::filesystem::remove_all(dir, ec);
+    if (ec) {
+      // Expected right after an in-app update: the installer that started us may still be
+      // finishing up, and Windows will not delete a running executable. The next start gets it.
+      BOOST_LOG(info) << "update: old staged installers not removed yet: "sv << ec.message();
+    } else if (removed > 1) {
+      BOOST_LOG(info) << "update: removed "sv << (removed - 1) << " old staged installer file(s)"sv;
+    }
   }
 
   void

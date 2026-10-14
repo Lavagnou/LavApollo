@@ -6,9 +6,10 @@
 #pragma once
 
 // standard includes
-#include <string>
 #include <chrono>
 #include <list>
+#include <string>
+#include <vector>
 
 // lib includes
 #include <boost/property_tree/ptree.hpp>
@@ -282,4 +283,13 @@ namespace nvhttp {
     const bool allow_client_commands,
     const bool always_use_virtual_display
   );
+
+  /**
+   * @brief Parse and validate the `displayLayout=` launch argument.
+   * @param layout The raw argument value; empty when the client did not ask for a layout.
+   * @param canvas_width Stream width the client requested via `mode=`.
+   * @param canvas_height Stream height the client requested via `mode=`.
+   * @return The requested displays, or an empty vector if absent or invalid.
+   */
+  std::vector<rtsp_stream::display_layout_rect_t> parse_display_layout(const std::string &layout, int canvas_width, int canvas_height);
 }  // namespace nvhttp

@@ -5,7 +5,9 @@
 #pragma once
 
 // standard includes
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -77,6 +79,65 @@ namespace net {
    *          includes a leading separator so it can be appended after err.what().
    */
   std::string bind_error_explanation(const boost::system::error_code &ec);
+
+  /**
+   * @brief Configure a socket, before bind(), so it fails to bind a port another process uses.
+   *
+   * On POSIX, SO_REUSEADDR only lets a socket reuse a port left in TIME_WAIT, which is what
+   * every server here wants. On Windows it means something else entirely: permission to bind
+   * a port another process is *actively* using (unless that process asked for exclusivity), so
+   * a probe would report a taken port as free. There, use SO_EXCLUSIVEADDRUSE instead.
+   * Meant for short-lived probes; see set_listener_reuse() for real listeners.
+   */
+  template<class Socket>
+  void set_exclusive_bind(Socket &socket, boost::system::error_code &ec) {
+#ifdef _WIN32
+    BOOL exclusive = TRUE;
+    if (setsockopt(socket.native_handle(), SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *) &exclusive, sizeof(exclusive))) {
+      ec = boost::system::error_code(WSAGetLastError(), boost::system::system_category());
+    }
+#else
+    socket.set_option(boost::asio::socket_base::reuse_address {true}, ec);
+#endif
+  }
+
+  /**
+   * @brief Configure a real listener, before bind(), so it cannot share a port that is in use.
+   *
+   * Not SO_EXCLUSIVEADDRUSE on Windows: a listener using it may be unable to bind again while
+   * its previous connections sit in TIME_WAIT, i.e. right after a service restart. Leaving
+   * SO_REUSEADDR off is enough for the bind to fail on a port another process uses. POSIX
+   * keeps SO_REUSEADDR, which there only covers TIME_WAIT.
+   */
+  template<class Socket>
+  void set_listener_reuse(Socket &socket, boost::system::error_code &ec) {
+#ifdef _WIN32
+    socket.set_option(boost::asio::socket_base::reuse_address {false}, ec);
+#else
+    socket.set_option(boost::asio::socket_base::reuse_address {true}, ec);
+#endif
+  }
+
+  /**
+   * @brief Declare how many streaming servers are about to bind (resets the tally).
+   *
+   * The host must only be advertised (mDNS, UPnP) once those servers actually listen: the
+   * pre-flight probe runs earlier, and a port can be taken in between.
+   */
+  void expect_streaming_binds(int count);
+
+  /**
+   * @brief Report the outcome of one streaming server's bind.
+   */
+  void report_streaming_bind(bool success);
+
+  /**
+   * @brief Wait until every expected streaming server has bound.
+   * @param timeout Give up after this long.
+   * @param abort Polled while waiting; returning true stops the wait early (shutdown).
+   * @return true only if all of them bound successfully.
+   */
+  bool wait_for_streaming_binds(std::chrono::milliseconds timeout, const std::function<bool()> &abort);
 
   using host_t = util::safe_ptr<ENetHost, free_host>;
   using peer_t = ENetPeer *;

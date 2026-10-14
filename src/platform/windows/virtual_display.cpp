@@ -324,17 +324,17 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 
 	UINT32 pathCount = 0;
 	UINT32 modeCount = 0;
-	if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount)) {
-		wprintf(L"[SUDOVDA] Failed to query display configuration size.\n");
-		return ERROR_INVALID_PARAMETER;
+	if (auto status = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount)) {
+		BOOST_LOG(warning) << "SUDOVDA: failed to query the display configuration size while applying a layout (error " << status << ')';
+		return status;
 	}
 
 	std::vector<DISPLAYCONFIG_PATH_INFO> pathArray(pathCount);
 	std::vector<DISPLAYCONFIG_MODE_INFO> modeArray(modeCount);
 
-	if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, pathArray.data(), &modeCount, modeArray.data(), nullptr) != ERROR_SUCCESS) {
-		wprintf(L"[SUDOVDA] Failed to query display configuration.\n");
-		return ERROR_INVALID_PARAMETER;
+	if (auto status = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, pathArray.data(), &modeCount, modeArray.data(), nullptr); status != ERROR_SUCCESS) {
+		BOOST_LOG(warning) << "SUDOVDA: failed to query the display configuration while applying a layout (error " << status << ')';
+		return status;
 	}
 
 	constexpr size_t NOT_FOUND = (size_t)-1;

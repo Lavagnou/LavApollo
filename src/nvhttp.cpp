@@ -7,12 +7,12 @@
 
 // standard includes
 #include <algorithm>
+#include <charconv>
 #include <filesystem>
 #include <format>
 #include <sstream>
 #include <string>
 #include <utility>
-#include <string>
 #include <vector>
 
 // lib includes
@@ -383,7 +383,6 @@ namespace nvhttp {
     }
   }
 
-#ifdef _WIN32
   /**
    * @brief Parse the `displayLayout=` launch argument into the displays to emulate.
    *
@@ -402,21 +401,35 @@ namespace nvhttp {
    * @param canvas_height Stream height the client requested via `mode=`.
    * @return The requested displays, or an empty vector if absent or invalid.
    */
-  std::vector<rtsp_stream::virtual_display_t> parse_display_layout(const std::string &layout, int canvas_width, int canvas_height) {
+  std::vector<rtsp_stream::display_layout_rect_t> parse_display_layout(const std::string &layout, int canvas_width, int canvas_height) {
     if (layout.empty()) {
       return {};
     }
 
     auto reject = [&](const std::string_view &why) {
       BOOST_LOG(warning) << "Ignoring displayLayout ["sv << layout << "]: "sv << why;
-      return std::vector<rtsp_stream::virtual_display_t> {};
+      return std::vector<rtsp_stream::display_layout_rect_t> {};
     };
 
-    std::vector<rtsp_stream::virtual_display_t> displays;
+    // A client-supplied number: digits only, the whole field, and small enough that no sum of
+    // two of them can overflow. atoi() accepted "12abc", " 12", and INT_MAX alike, and the
+    // last one turned the bounds checks below into signed overflow.
+    auto parse_field = [](std::string_view text, int &out) {
+      if (text.empty()) {
+        return false;
+      }
+      auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), out);
+      return ec == std::errc {} && end == text.data() + text.size() && out >= 0 && out <= rtsp_stream::MAX_LAYOUT_COORDINATE;
+    };
 
-    std::stringstream groups(layout);
-    std::string group;
-    while (std::getline(groups, group, ';')) {
+    std::vector<rtsp_stream::display_layout_rect_t> displays;
+
+    std::string_view remaining {layout};
+    while (!remaining.empty()) {
+      auto group_end = remaining.find(';');
+      auto group = remaining.substr(0, group_end);
+      remaining = group_end == std::string_view::npos ? std::string_view {} : remaining.substr(group_end + 1);
+
       if (group.empty()) {
         continue;
       }
@@ -427,25 +440,32 @@ namespace nvhttp {
 
       int fields[5] = {};
       int field_count = 0;
-      std::stringstream parts(group);
-      std::string part;
-      while (field_count < 5 && std::getline(parts, part, ',')) {
-        fields[field_count++] = atoi(part.c_str());
+      while (true) {
+        auto field_end = group.find(',');
+        if (field_count == 5 || !parse_field(group.substr(0, field_end), fields[field_count])) {
+          return reject("expected x,y,w,h,primary per display, as small non-negative integers"sv);
+        }
+        ++field_count;
+
+        if (field_end == std::string_view::npos) {
+          break;
+        }
+        group.remove_prefix(field_end + 1);
       }
 
       if (field_count != 5) {
         return reject("expected x,y,w,h,primary per display"sv);
       }
 
-      rtsp_stream::virtual_display_t display;
+      rtsp_stream::display_layout_rect_t display;
       display.x = fields[0];
       display.y = fields[1];
       display.width = fields[2];
       display.height = fields[3];
       display.primary = fields[4] != 0;
 
-      if (display.width <= 0 || display.height <= 0 || display.x < 0 || display.y < 0) {
-        return reject("a display has a negative origin or a non-positive size"sv);
+      if (display.width <= 0 || display.height <= 0) {
+        return reject("a display has a non-positive size"sv);
       }
 
       if (display.x + display.width > canvas_width || display.y + display.height > canvas_height) {
@@ -488,7 +508,6 @@ namespace nvhttp {
 
     return displays;
   }
-#endif
 
   std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, bool input_only, const args_t &args, const crypto::named_cert_t* named_cert_p) {
     auto launch_session = std::make_shared<rtsp_stream::launch_session_t>();
@@ -578,11 +597,11 @@ namespace nvhttp {
     // Validated against the mode parsed above, so an admin-side display_mode override for
     // this client makes the layout disagree with the canvas and get rejected -- which is
     // the right outcome: the override wins and the client gets one display of that size.
-    launch_session->virtual_displays = parse_display_layout(
-      get_arg(args, "displayLayout", ""),
-      launch_session->width,
-      launch_session->height
-    );
+    for (const auto &rect : parse_display_layout(get_arg(args, "displayLayout", ""), launch_session->width, launch_session->height)) {
+      rtsp_stream::virtual_display_t display;
+      static_cast<rtsp_stream::display_layout_rect_t &>(display) = rect;
+      launch_session->virtual_displays.push_back(std::move(display));
+    }
 
     if (!launch_session->virtual_displays.empty()) {
       // Asking for a layout is as plain a request for virtual displays as the flag itself.
@@ -1972,7 +1991,14 @@ namespace nvhttp {
     https_server.resource["^/pyrowave-bandwidth-probe$"]["GET"] = getPyroWaveBandwidthProbe;
     https_server.resource["^/actions/clipboard$"]["POST"] = setClipboard;
 
+#ifdef _WIN32
+    // SO_REUSEADDR on Windows lets a listener share a port another process is actively using;
+    // without it the bind fails instead and the host is not advertised (see main.cpp).
+    // Same rule as net::set_listener_reuse().
+    https_server.config.reuse_address = false;
+#else
     https_server.config.reuse_address = true;
+#endif
     https_server.config.address = net::af_to_any_address_string(address_family);
     https_server.config.port = port_https;
 
@@ -1980,14 +2006,30 @@ namespace nvhttp {
     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
     http_server.resource["^/pair$"]["GET"] = pair<SimpleWeb::HTTP>;
 
+#ifdef _WIN32
+    // SO_REUSEADDR on Windows lets a listener share a port another process is actively using;
+    // without it the bind fails instead and the host is not advertised (see main.cpp).
+    // Same rule as net::set_listener_reuse().
+    http_server.config.reuse_address = false;
+#else
     http_server.config.reuse_address = true;
+#endif
     http_server.config.address = net::af_to_any_address_string(address_family);
     http_server.config.port = port_http;
 
     auto accept_and_run = [&](auto *http_server, std::uint16_t port, std::string_view role) {
+      // start() calls this once it is bound and listening, before serving.
+      bool bound = false;
       try {
-        http_server->start();
+        http_server->start([&bound](unsigned short) {
+          bound = true;
+          net::report_streaming_bind(true);
+        });
       } catch (boost::system::system_error &err) {
+        if (!bound) {
+          net::report_streaming_bind(false);
+        }
+
         // It's possible the exception gets thrown after calling http_server->stop() from a different thread
         if (shutdown_event->peek()) {
           return;
@@ -1997,6 +2039,10 @@ namespace nvhttp {
         // Do not raise a global shutdown: the Web UI must stay up to surface this error.
         return;
       } catch (std::exception &err) {
+        if (!bound) {
+          net::report_streaming_bind(false);
+        }
+
         // Safety net so no exception can escape a std::thread and trigger std::terminate/abort.
         if (shutdown_event->peek()) {
           return;

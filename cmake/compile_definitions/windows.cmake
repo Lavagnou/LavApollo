@@ -132,6 +132,8 @@ list(PREPEND PLATFORM_LIBRARIES
         shlwapi
         synchronization.lib
         userenv
+        crypt32
+        wintrust
         version  # GetFileVersionInfoW (RTSS version check)
         ws2_32
         wsock32

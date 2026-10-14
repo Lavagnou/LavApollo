@@ -405,4 +405,10 @@ namespace video {
    * @brief Whether the last encoder probe found a working encoder. Never probes.
    */
   bool encoder_probe_succeeded();
+
+  /**
+   * @brief Whether the encoder chosen by the last probe can change its bitrate mid-stream
+   *        (see encode_session_t::update_bitrate()).
+   */
+  bool encoder_supports_bitrate_change();
 }  // namespace video

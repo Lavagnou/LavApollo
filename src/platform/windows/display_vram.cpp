@@ -3,8 +3,8 @@
  * @brief Definitions for handling video ram.
  */
 // standard includes
+#include <algorithm>
 #include <cmath>
-#include <thread>
 
 // platform includes
 #include <d3dcompiler.h>
@@ -2005,13 +2005,22 @@ namespace platf::dxgi {
     // Only one duplication can be waited on at a time, and the displays have independent
     // vblanks. Handing the whole timeout to one of them would cap the frame rate at
     // 1/timeout whenever that display happens to be idle while another is not -- five
-    // frames a second on the 200ms path. So every source is polled in turn and the wait is
-    // spent sleeping between rounds: it costs a millisecond of latency granularity and
-    // keeps whichever display is actually moving in charge of the pace.
+    // frames a second on the 200ms path.
+    //
+    // So the wait is sliced: block on the first display for a quarter of a frame interval at
+    // most, then poll the others without waiting, and go round again. A moving first display
+    // wakes us at its vblank; a moving other display is picked up within a quarter frame.
+    // This used to poll everything at 0ms and sleep 1ms between rounds, which on a still
+    // desktop meant a thousand wakeups and N thousand AcquireNextFrame() calls a second.
+    // Re-polling a source is safe: next_frame() releases whatever it was holding first.
     const auto deadline = std::chrono::steady_clock::now() + timeout;
+    const auto poll_slice = std::max(std::chrono::milliseconds(1), std::chrono::milliseconds(250 / std::max(client_frame_rate, 1)));
 
     while (true) {
-      auto status = pump(dup, -1, base_canvas_x, base_canvas_y, base_width, base_height, std::chrono::milliseconds(0));
+      auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+      auto wait = std::clamp(remaining, std::chrono::milliseconds(0), poll_slice);
+
+      auto status = pump(dup, -1, base_canvas_x, base_canvas_y, base_width, base_height, wait);
       if (status != capture_e::ok) {
         return status;
       }
@@ -2027,11 +2036,6 @@ namespace platf::dxgi {
       if (have_update || std::chrono::steady_clock::now() >= deadline) {
         break;
       }
-
-      // Sleeping rather than spinning keeps us off the device lock that AcquireNextFrame()
-      // contends for with the encoding thread. Re-polling a source is safe: next_frame()
-      // releases whatever it was holding before acquiring again.
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     // No canvas means no display has produced a frame yet, so the capture format is still

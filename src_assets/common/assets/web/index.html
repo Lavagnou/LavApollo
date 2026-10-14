@@ -198,11 +198,18 @@
         const st = this.currentState;
         if (st === 0 || st === 6) {
           this.updating = true;
+          let result;
           try {
-            await fetch("./api/update/download", { method: "POST" });
+            result = await this.postUpdateApi("./api/update/download");
           } catch (e) {
             console.error(e);
-            this.updating = false;
+            this.failUpdate(String(e));
+            return;
+          }
+          // Not started because another tab already started it is fine: follow that one.
+          const inFlight = [2, 3, 4].includes(result.body.state);
+          if (!result.ok || !(result.body.started || inFlight)) {
+            this.failUpdate(result.body.message || result.body.error || ("HTTP " + result.status));
             return;
           }
           this.startStatusPolling();
@@ -240,17 +247,41 @@
           console.error(e);
         }
       },
-      async requestInstall() {
+      // The update endpoints are CSRF-protected by requiring a JSON content type, exactly like
+      // every other POST in the Web UI: without the header the server answers 400 and nothing
+      // happens. A 200 can still carry a refusal in its body, so both are checked.
+      async postUpdateApi(url) {
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        let body = {};
         try {
-          const resp = await fetch("./api/update/install", { method: "POST" });
-          if (resp.ok) {
-            this.watchReconnect();
-          } else {
-            this.updating = false;
-          }
+          body = await resp.json();
+        } catch (e) {
+          // Non-JSON error page: fall back to the HTTP status below.
+        }
+        return { ok: resp.ok, status: resp.status, body };
+      },
+      failUpdate(message) {
+        this.stopStatusPolling();
+        this.updating = false;
+        this.updateStatus = { state: 6, message };
+      },
+      async requestInstall() {
+        let result;
+        try {
+          result = await this.postUpdateApi("./api/update/install");
         } catch (e) {
           console.error(e);
-          this.updating = false;
+          this.failUpdate(String(e));
+          return;
+        }
+        if (result.ok && result.body.status) {
+          this.watchReconnect();
+        } else {
+          this.failUpdate(result.body.error || result.body.message || ("HTTP " + result.status));
         }
       },
       watchReconnect() {

@@ -462,6 +462,7 @@ namespace video {
   struct sync_session_t {
     sync_session_ctx_t *ctx;
     std::unique_ptr<encode_session_t> session;
+    bool bitrate_change_failed = false;
   };
 
   using encode_session_ctx_queue_t = safe::queue_t<sync_session_ctx_t>;
@@ -1068,6 +1069,17 @@ namespace video {
   };
 
   static encoder_t *chosen_encoder;
+
+  bool encoder_supports_bitrate_change() {
+#ifdef _WIN32
+    // Only the standalone NVENC session implements update_bitrate(); every FFmpeg-backed
+    // encoder (including NVENC on Linux) keeps the bitrate it was opened with.
+    return chosen_encoder == &nvenc;
+#else
+    return false;
+#endif
+  }
+
   int active_hevc_mode;
   int active_av1_mode;
   int active_pyrowave_mode;
@@ -2069,6 +2081,7 @@ namespace video {
 
     std::chrono::steady_clock::time_point encode_frame_timestamp;
     bool missing_frame_timestamp_warning_logged = false;
+    bool bitrate_change_failed = false;
 
     while (true) {
       // Break out of the encoding loop if any of the following are true:
@@ -2092,8 +2105,10 @@ namespace video {
 
       while (bitrate_events->peek()) {
         if (auto bitrate_kbps = bitrate_events->pop(0ms)) {
-          if (!session->update_bitrate(*bitrate_kbps)) {
-            BOOST_LOG(debug) << "Encoder doesn't support mid-stream bitrate change"sv;
+          if (!session->update_bitrate(*bitrate_kbps) && !bitrate_change_failed) {
+            // The stream side only asks encoders that claim support, so this is a real failure.
+            BOOST_LOG(warning) << "Encoder could not change its bitrate to "sv << *bitrate_kbps << " kbps; keeping the current one"sv;
+            bitrate_change_failed = true;
           }
         }
       }
@@ -2377,8 +2392,10 @@ namespace video {
 
           while (ctx->bitrate_events->peek()) {
             if (auto bitrate_kbps = ctx->bitrate_events->pop(0ms)) {
-              if (!pos->session->update_bitrate(*bitrate_kbps)) {
-                BOOST_LOG(debug) << "Encoder doesn't support mid-stream bitrate change"sv;
+              if (!pos->session->update_bitrate(*bitrate_kbps) && !pos->bitrate_change_failed) {
+                // The stream side only asks encoders that claim support, so this is a real failure.
+                BOOST_LOG(warning) << "Encoder could not change its bitrate to "sv << *bitrate_kbps << " kbps; keeping the current one"sv;
+                pos->bitrate_change_failed = true;
               }
             }
           }

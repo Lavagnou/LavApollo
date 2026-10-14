@@ -98,6 +98,9 @@
           } else {
             if (res.status === 401) {
               throw new Error('Please check your username and password')
+            } else if (res.status === 429) {
+              const wait = res.headers.get('Retry-After');
+              throw new Error(`Too many failed attempts, try again in ${wait || 'a few'} seconds`);
             } else {
               throw new Error(`Server returned ${res.status}`);
             }

@@ -23,6 +23,7 @@
 #include "process.h"
 #include "session_history.h"
 #include "system_tray.h"
+#include "updater.h"
 #include "upnp.h"
 #include "uuid.h"
 #include "video.h"
@@ -428,6 +429,10 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
+  // An installer staged by the previous version has either run (we are its result) or been
+  // abandoned. Either way it has no business lingering next to the binary.
+  updater::cleanup_staged_installers();
+
   // Pre-flight: verify every streaming port can be bound before advertising the
   // host or starting the streaming servers. This catches reserved/excluded Windows
   // port ranges (WSAEACCES) and ports already in use, and lists *all* failing ports
@@ -451,12 +456,29 @@ int main(int argc, char *argv[]) {
 #endif
   }
 
-  // Only advertise the host (mDNS/UPnP) when it can actually stream.
+  // Only advertise the host (mDNS/UPnP) when it can actually stream: not merely when the
+  // pre-flight probe passed, but once the streaming servers really listen. A port can be
+  // taken between the probe and the real bind, and advertising a host that then refuses
+  // every connection is worse than not advertising it.
+  // Two nvhttp servers (HTTP + HTTPS) and the RTSP server.
+  net::expect_streaming_binds(3);
+  auto streaming_servers_up = [shutdown_event]() {
+    if (net::wait_for_streaming_binds(5s, [&shutdown_event]() {
+          return shutdown_event->peek();
+        })) {
+      return true;
+    }
+    if (!shutdown_event->peek()) {
+      BOOST_LOG(warning) << "Streaming servers did not all come up; not advertising this host"sv;
+    }
+    return false;
+  };
+
   std::unique_ptr<platf::deinit_t> mDNS;
   std::future<void> sync_mDNS;
   if (streaming_ports_ok) {
-    sync_mDNS = std::async(std::launch::async, [&mDNS]() {
-      if (config::sunshine.enable_discovery) {
+    sync_mDNS = std::async(std::launch::async, [&mDNS, streaming_servers_up]() {
+      if (config::sunshine.enable_discovery && streaming_servers_up()) {
         mDNS = platf::publish::start();
       }
     });
@@ -465,8 +487,10 @@ int main(int argc, char *argv[]) {
   std::unique_ptr<platf::deinit_t> upnp_unmap;
   std::future<void> sync_upnp;
   if (streaming_ports_ok) {
-    sync_upnp = std::async(std::launch::async, [&upnp_unmap]() {
-      upnp_unmap = upnp::start();
+    sync_upnp = std::async(std::launch::async, [&upnp_unmap, streaming_servers_up]() {
+      if (streaming_servers_up()) {
+        upnp_unmap = upnp::start();
+      }
     });
   }
 

@@ -10,9 +10,11 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <numeric>
 #include <algorithm>
 
@@ -1818,12 +1820,85 @@ namespace confighttp {
    * }
    * @endcode
    */
+  namespace {
+    /**
+     * Failed Web UI logins, per client address.
+     *
+     * The login endpoint answers as fast as it can hash, so without this a machine on the LAN
+     * could try passwords as fast as the network allows. After a few misses an address is
+     * locked out for an exponentially growing time instead. Locking out, rather than sleeping
+     * in the handler, matters: the server runs its handlers on one thread, so a sleep would
+     * stall the Web UI for everyone, including the legitimate user.
+     */
+    struct login_failures_t {
+      int count = 0;
+      std::chrono::steady_clock::time_point locked_until {};
+      std::chrono::steady_clock::time_point last_failure {};
+    };
+
+    constexpr int LOGIN_FREE_ATTEMPTS = 3;
+    constexpr auto LOGIN_MAX_LOCKOUT = 30s;
+    constexpr std::size_t LOGIN_TRACKED_ADDRESSES = 256;
+
+    std::mutex login_failures_mutex;
+    std::unordered_map<std::string, login_failures_t> login_failures;
+
+    /// Seconds the address must still wait before trying again, or 0.
+    long long login_lockout_remaining(const std::string &address) {
+      std::lock_guard lg {login_failures_mutex};
+      auto it = login_failures.find(address);
+      if (it == login_failures.end()) {
+        return 0;
+      }
+      auto remaining = std::chrono::ceil<std::chrono::seconds>(it->second.locked_until - std::chrono::steady_clock::now());
+      return std::max<long long>(remaining.count(), 0);
+    }
+
+    void record_login_failure(const std::string &address) {
+      const auto now = std::chrono::steady_clock::now();
+      std::lock_guard lg {login_failures_mutex};
+
+      if (!login_failures.contains(address) && login_failures.size() >= LOGIN_TRACKED_ADDRESSES) {
+        // Bounded: forget the address that has been quiet the longest.
+        auto oldest = std::min_element(login_failures.begin(), login_failures.end(), [](const auto &a, const auto &b) {
+          return a.second.last_failure < b.second.last_failure;
+        });
+        login_failures.erase(oldest);
+      }
+
+      auto &entry = login_failures[address];
+      entry.count++;
+      entry.last_failure = now;
+      if (entry.count >= LOGIN_FREE_ATTEMPTS) {
+        // 1 s, 2 s, 4 s... capped.
+        auto shift = std::min(entry.count - LOGIN_FREE_ATTEMPTS, 5);
+        entry.locked_until = now + std::min<std::chrono::steady_clock::duration>(std::chrono::seconds(1LL << shift), LOGIN_MAX_LOCKOUT);
+      }
+    }
+
+    void clear_login_failures(const std::string &address) {
+      std::lock_guard lg {login_failures_mutex};
+      login_failures.erase(address);
+    }
+  }  // namespace
+
   void login(resp_https_t response, req_https_t request) {
     if (!checkIPOrigin(response, request) || !validateContentType(response, request, "application/json")) {
       return;
     }
 
-    auto fg = util::fail_guard([&]{
+    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    if (auto wait = login_lockout_remaining(address); wait > 0) {
+      BOOST_LOG(warning) << "Web UI Login from ["sv << address << "] refused: too many failed attempts, "sv << wait << "s left"sv;
+      const SimpleWeb::CaseInsensitiveMultimap headers {
+        {"Retry-After", std::to_string(wait)}
+      };
+      response->write(SimpleWeb::StatusCode::client_error_too_many_requests, headers);
+      return;
+    }
+
+    auto fg = util::fail_guard([&] {
+      record_login_failure(address);
       response->write(SimpleWeb::StatusCode::client_error_unauthorized);
     });
 
@@ -1835,7 +1910,6 @@ namespace confighttp {
       std::string password = input_tree.value("password", "");
       const bool remember_me = input_tree.value("remember_me", false);
       std::string hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string();
-      const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
       if (!boost::iequals(username, config::sunshine.username) || hash != config::sunshine.password) {
         BOOST_LOG(info) << "Web UI: ["sv << address << "] -- login failed"sv;
         return;
@@ -1854,11 +1928,11 @@ namespace confighttp {
       add_session_cookies(headers, tokens);
       // Retire the cookie of the single-session login this replaced
       headers.emplace("Set-Cookie", "auth=; Path=/; Secure; SameSite=Strict; Max-Age=0");
+      clear_login_failures(address);
       response->write(headers);
       fg.disable();
     } catch (std::exception &e) {
-      BOOST_LOG(warning) << "Web UI Login failed: ["sv << net::addr_to_normalized_string(request->remote_endpoint().address())
-                               << "]: "sv << e.what();
+      BOOST_LOG(warning) << "Web UI Login failed: ["sv << address << "]: "sv << e.what();
       response->write(SimpleWeb::StatusCode::server_error_internal_server_error);
       fg.disable();
       return;

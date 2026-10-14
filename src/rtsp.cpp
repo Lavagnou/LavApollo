@@ -412,7 +412,12 @@ namespace rtsp_stream {
         return -1;
       }
 
-      acceptor.set_option(boost::asio::socket_base::reuse_address {true});
+      // No SO_REUSEADDR on Windows: there it would let this bind succeed on a port another
+      // process is using, and the host would be advertised with RTSP shared with it.
+      net::set_listener_reuse(acceptor, ec);
+      if (ec) {
+        return -1;
+      }
 
       acceptor.bind(tcp::endpoint(af == net::IPV4 ? tcp::v4() : tcp::v6(), port), ec);
       if (ec) {
@@ -1245,9 +1250,11 @@ namespace rtsp_stream {
     boost::system::error_code ec;
     if (server.bind(net::af_from_enum_string(config::sunshine.address_family), net::map_port(rtsp_stream::RTSP_SETUP_PORT), ec)) {
       BOOST_LOG(fatal) << "Couldn't bind RTSP server to port ["sv << net::map_port(rtsp_stream::RTSP_SETUP_PORT) << "]: "sv << ec.message() << net::bind_error_explanation(ec);
+      net::report_streaming_bind(false);
       // Do not raise a global shutdown: the Web UI must stay up to surface this error.
       return;
     }
+    net::report_streaming_bind(true);
 
     std::thread rtsp_thread {[&shutdown_event] {
       auto broadcast_shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
