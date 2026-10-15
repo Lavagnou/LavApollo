@@ -379,8 +379,11 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
     key) and finding the session by IP. The client side is `LiSendMicrophoneData()` in
     `Lavagnou/moonlight-common-c`.
   - **Negotiation.** `serverinfo` publishes `MicPassthroughState` per paired client: `ready` / `disabled` /
-    `no_permission` / `no_device` (`mic_passthrough::state()`, device lookup cached 5 s since clients poll).
-    The client sends `clientMicRequested=1` only on `ready`, and warns with the reason otherwise.
+    `no_permission` / `no_device` (`mic_passthrough::state()`). The client sends `clientMicRequested=1`
+    only on `ready`, and warns with the reason otherwise.
+  - ⚠️ **`state()` never touches the audio stack**: it reads an atomic that `mic_passthrough::init()`'s
+    background thread refreshes every 3 s. serverinfo runs on the HTTPS thread, and anything that can
+    block there takes the host offline for every client (see the recovery monitor above).
   - **Permission `PERM::microphone`** (`_operation << 5`, `0x00200000`), checked at launch **and on every
     frame**, so unticking it silences a client mid-stream. Devices saved before it existed get it once if
     they hold every operation the UI shows (`clipboard_set | clipboard_read | server_cmd`); the per-device
@@ -400,11 +403,19 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
     adapter: "Microphone (Steam Streaming Microphone)", "CABLE Output") becomes the default for every
     role while streaming. The previous default is restored per role, **unless** the user picked another
     one meanwhile.
+  - **Disabled endpoints.** Steam's pair is often turned off in the Sound settings (it clutters the
+    device lists): an endpoint disabled there is `DEVICE_STATE_DISABLED`, invisible to the usual
+    `DEVICE_STATE_ACTIVE` lookups, which is why the first test reported `no_device` with Steam installed.
+    `find_mic_endpoints()` now finds them too (flagged), `acquire()` enables them with
+    `IPolicyConfig::SetEndpointVisibility` for the session and `release()` disables **only those** again.
   - **Driver.** `install_steam_audio_drivers` also installs `SteamStreamingMicrophone.inf` (next to the
-    speakers' INF in Steam's `drivers\Windows10\x64`), at startup on a background thread
-    (`mic_passthrough::install_driver_if_needed()`), only when `mic_sink` is empty.
-  - `find_device_id()` takes an `EDataFlow` (default `eRender`); `audio_endpoints.h` exposes the endpoint
-    lookups to `mic_passthrough.cpp`. Those need COM on the calling thread.
+    speakers' INF in Steam's `drivers\Windows10\x64`), from `mic_passthrough::init()`'s thread, only
+    when `mic_sink` is empty. "Installed" means present in **any usable state**, for the speakers too:
+    reinstalling over a disabled endpoint fails with error 259 (`ERROR_NO_MORE_ITEMS`), which upstream
+    logged on every stream.
+  - `find_device_id()` takes an `EDataFlow` (default `eRender`) and a `DEVICE_STATE_*` mask (default
+    active only); `audio_endpoints.h` exposes the endpoint lookups to `mic_passthrough.cpp`. Those need
+    COM on the calling thread.
 
 ### PyroWave
 

@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 // platform includes
 #include <Audioclient.h>
@@ -258,6 +259,9 @@ namespace mic_passthrough {
       std::wstring capture_id;
       std::array<std::wstring, ERole_enum_count> previous_defaults;
 
+      // Endpoints that were disabled in the Sound settings and that we enabled for the session
+      std::vector<std::wstring> enabled_endpoints;
+
       std::uint64_t frames = 0;
       std::uint64_t concealed = 0;
       std::uint64_t late = 0;
@@ -283,6 +287,44 @@ namespace mic_passthrough {
         owner.previous_defaults[role] = std::move(previous);
       }
     }
+
+    /**
+     * @brief Enables whichever side of the virtual microphone is disabled, noting it in
+     *        `enabled`, and waits for Windows to bring it up.
+     * @return The endpoints as they are now, or nothing if they never became usable.
+     */
+    std::optional<platf::audio::mic_endpoints_t> enable_endpoints(platf::audio::mic_endpoints_t endpoints, std::vector<std::wstring> &enabled) {
+      if (endpoints.render_disabled && platf::audio::set_endpoint_enabled(endpoints.render_id, true)) {
+        enabled.push_back(endpoints.render_id);
+      }
+      if (endpoints.capture_disabled && platf::audio::set_endpoint_enabled(endpoints.capture_id, true)) {
+        enabled.push_back(endpoints.capture_id);
+      }
+      if (enabled.empty()) {
+        return endpoints.render_disabled ? std::nullopt : std::optional {endpoints};
+      }
+
+      BOOST_LOG(info) << "Microphone passthrough: enabled ["sv << endpoints.name << "] for the session"sv;
+      for (int i = 0; i < 30; ++i) {
+        auto now = platf::audio::find_mic_endpoints(config::audio.mic_sink);
+        if (now && !now->render_disabled) {
+          return now;
+        }
+        std::this_thread::sleep_for(100ms);
+      }
+      return std::nullopt;
+    }
+
+    void disable_endpoints(std::vector<std::wstring> &enabled) {
+      for (const auto &id : enabled) {
+        platf::audio::set_endpoint_enabled(id, false);
+      }
+      enabled.clear();
+    }
+
+    /// Whether the virtual microphone exists (enabled or not): -1 until first checked.
+    /// Refreshed by a background thread so that serverinfo never touches the audio stack.
+    std::atomic_int device_present {-1};
 
     void restore_defaults() {
       for (int role = 0; role < ERole_enum_count; ++role) {
@@ -319,19 +361,8 @@ namespace mic_passthrough {
       return state_e::no_permission;
     }
 
-    static std::mutex cache_mutex;
-    static std::chrono::steady_clock::time_point checked_at;
-    static bool device_found = false;
-
-    std::lock_guard lg {cache_mutex};
-    auto now = std::chrono::steady_clock::now();
-    if (checked_at == std::chrono::steady_clock::time_point {} || now - checked_at > 5s) {
-      com_t com;
-      device_found = platf::audio::find_mic_endpoints(config::audio.mic_sink).has_value();
-      checked_at = now;
-    }
-
-    return device_found ? state_e::ready : state_e::no_device;
+    // Disabled in the Sound settings still counts: acquire() enables it for the session
+    return device_present.load() == 1 ? state_e::ready : state_e::no_device;
   }
 
   bool acquire(const void *session, const std::string &device_name) {
@@ -344,10 +375,21 @@ namespace mic_passthrough {
     }
 
     com_t com;
-    auto endpoints = platf::audio::find_mic_endpoints(config::audio.mic_sink);
-    if (!endpoints) {
+    auto found = platf::audio::find_mic_endpoints(config::audio.mic_sink);
+    if (!found) {
       BOOST_LOG(warning) << "Microphone passthrough: no virtual microphone found ("sv
                          << (config::audio.mic_sink.empty() ? "Steam Streaming Microphone"s : config::audio.mic_sink) << ')';
+      return false;
+    }
+
+    std::vector<std::wstring> enabled;
+    auto endpoints = enable_endpoints(*found, enabled);
+    // Puts back whatever we enabled if the session doesn't get the microphone after all
+    auto undo_enable = util::fail_guard([&enabled]() {
+      disable_endpoints(enabled);
+    });
+    if (!endpoints) {
+      BOOST_LOG(warning) << "Microphone passthrough: ["sv << found->name << "] is disabled and couldn't be enabled"sv;
       return false;
     }
 
@@ -369,6 +411,8 @@ namespace mic_passthrough {
     owner.renderer = std::move(renderer);
     owner.tracker.reset();
     owner.frames = owner.concealed = owner.late = owner.dropped_samples = 0;
+    owner.enabled_endpoints = std::move(enabled);
+    undo_enable.disable();
 
     if (config::audio.mic_set_default) {
       if (endpoints->capture_id.empty()) {
@@ -395,6 +439,8 @@ namespace mic_passthrough {
 
     owner.renderer.reset();
     owner.decoder.reset();
+    // Back to how the user left their Sound settings
+    disable_endpoints(owner.enabled_endpoints);
     owner.session = nullptr;
 
     BOOST_LOG(info) << "Microphone passthrough: ["sv << owner.device_name << "] stopped after "sv << owner.frames << " frames ("sv
@@ -444,15 +490,23 @@ namespace mic_passthrough {
     ++owner.frames;
   }
 
-  void install_driver_if_needed() {
-    if (!config::audio.mic_passthrough || !config::audio.mic_sink.empty() || !config::audio.install_steam_drivers) {
+  void init() {
+    if (!config::audio.mic_passthrough) {
       return;
     }
 
-    // The driver install waits seconds for Windows to settle: keep it off the startup path.
+    // Lives as long as the process. The driver install waits seconds for Windows to settle, and
+    // the device check must stay off HTTPS request threads: both happen here.
     std::thread {[]() {
       com_t com;
-      platf::audio::install_steam_microphone_if_missing();
+      if (config::audio.mic_sink.empty() && config::audio.install_steam_drivers) {
+        platf::audio::install_steam_microphone_if_missing();
+      }
+
+      while (true) {
+        device_present = platf::audio::find_mic_endpoints(config::audio.mic_sink).has_value() ? 1 : 0;
+        std::this_thread::sleep_for(3s);
+      }
     }}.detach();
   }
 }  // namespace mic_passthrough

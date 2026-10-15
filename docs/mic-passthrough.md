@@ -12,6 +12,8 @@ player as if they were sitting at the host.
   its driver at startup, like the Steam Streaming Speakers (*Install Steam Audio Drivers*, needs
   administrator rights). It appears as *Speakers (Steam Streaming Microphone)*, which LavApollo plays into,
   and *Microphone (Steam Streaming Microphone)*, which applications record from.
+- If the virtual microphone is disabled in Windows' Sound settings (Steam's pair often is), LavApollo
+  enables it for the session and disables it again afterwards.
 - Any other virtual cable works: set *Virtual microphone device* to its playback side, e.g. `CABLE Input`
   for VB-Cable. Applications then record from `CABLE Output`.
 - While a microphone is streaming, the virtual microphone becomes Windows' default recording device,

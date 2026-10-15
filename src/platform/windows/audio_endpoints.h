@@ -18,15 +18,23 @@ namespace platf::audio {
     std::wstring render_id;  ///< Playback endpoint the host writes to
     std::wstring capture_id;  ///< Its recording side, what applications use; empty if not found
     std::string name;  ///< Playback endpoint's friendly name, for logs
+    bool render_disabled = false;  ///< Turned off in the Sound settings; must be enabled to play into it
+    bool capture_disabled = false;  ///< Same for the recording side
   };
 
   /**
    * @brief Finds the virtual microphone.
    * @param mic_sink `config::audio.mic_sink`: empty for Steam Streaming Microphone, otherwise any
    *        name `virtual_sink` accepts. The recording side is the capture endpoint on the same
-   *        adapter (true of Steam's microphone and of VB-Cable).
+   *        adapter (true of Steam's microphone and of VB-Cable). Disabled endpoints are found too,
+   *        flagged as such: Steam's pair is often turned off to declutter the device lists.
    */
   std::optional<mic_endpoints_t> find_mic_endpoints(const std::string &mic_sink);
+
+  /**
+   * @brief Enables or disables an endpoint, as the Sound settings' "Enable"/"Disable" do.
+   */
+  bool set_endpoint_enabled(const std::wstring &id, bool enabled);
 
   /**
    * @brief The default recording device for `role` (an `ERole`), or an empty string.

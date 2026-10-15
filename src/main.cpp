@@ -357,8 +357,8 @@ int main(int argc, char *argv[]) {
   }
 
 #ifdef _WIN32
-  // Client microphones are played into Steam Streaming Microphone: install it like the speakers
-  mic_passthrough::install_driver_if_needed();
+  // Installs Steam Streaming Microphone if needed, then keeps track of the virtual microphone
+  mic_passthrough::init();
 #endif
 
   auto proc_deinit_guard = proc::init();

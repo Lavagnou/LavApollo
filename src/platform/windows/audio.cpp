@@ -919,15 +919,16 @@ namespace platf::audio {
      * @brief Search for currently present audio device_id using multiple match fields.
      * @param match_list Pairs of match fields and values
      * @param flow Playback (`eRender`) or recording (`eCapture`) endpoints
+     * @param state_mask `DEVICE_STATE_*` flags of the endpoints to consider
      * @return Optional pair of matched field and device_id
      */
-    std::optional<matched_field_t> find_device_id(const match_fields_list_t &match_list, EDataFlow flow = eRender) {
+    std::optional<matched_field_t> find_device_id(const match_fields_list_t &match_list, EDataFlow flow = eRender, DWORD state_mask = DEVICE_STATE_ACTIVE) {
       if (match_list.empty()) {
         return std::nullopt;
       }
 
       collection_t collection;
-      auto status = device_enum->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection);
+      auto status = device_enum->EnumAudioEndpoints(flow, state_mask, &collection);
       if (FAILED(status)) {
         BOOST_LOG(error) << "Couldn't enumerate: [0x"sv << util::hex(status).to_string_view() << ']';
         return std::nullopt;
@@ -1196,10 +1197,24 @@ namespace platf::audio {
       return std::wstring {value.prop.pwszVal};
     }
 
+    /**
+     * @brief Whether an endpoint is currently enabled (`DEVICE_STATE_ACTIVE`).
+     */
+    bool is_active(const std::wstring &device_id) {
+      device_t device;
+      DWORD state = 0;
+      return SUCCEEDED(device_enum->GetDevice(device_id.c_str(), &device)) && SUCCEEDED(device->GetState(&state)) &&
+             state == DEVICE_STATE_ACTIVE;
+    }
+
     policy_t policy;
     audio::device_enum_t device_enum;
     std::string assigned_sink;
   };
+
+  /// Endpoints a user turned off in the Sound settings are still there, as DEVICE_STATE_DISABLED.
+  /// Steam's own pair often is: an enabled one just clutters the device lists.
+  constexpr DWORD usable_states = DEVICE_STATE_ACTIVE | DEVICE_STATE_DISABLED;
 
   std::optional<mic_endpoints_t> find_mic_endpoints(const std::string &mic_sink) {
     audio_control_t control;
@@ -1207,28 +1222,51 @@ namespace platf::audio {
       return std::nullopt;
     }
 
-    auto render = control.find_device_id(
-      mic_sink.empty() ? control.match_steam_microphone() : control.match_all_fields(from_utf8(mic_sink)),
-      eRender
-    );
+    auto match_list = mic_sink.empty() ? control.match_steam_microphone() : control.match_all_fields(from_utf8(mic_sink));
+    // An enabled endpoint wins over a disabled one with the same name
+    auto render = control.find_device_id(match_list, eRender);
+    if (!render) {
+      render = control.find_device_id(match_list, eRender, usable_states);
+    }
     if (!render) {
       return std::nullopt;
     }
 
     mic_endpoints_t endpoints;
     endpoints.render_id = render->second;
+    endpoints.render_disabled = !control.is_active(render->second);
     endpoints.name = to_utf8(control.device_property(render->second, PKEY_Device_FriendlyName).value_or(render->second));
 
     // The recording side lives on the same adapter: "Microphone (Steam Streaming Microphone)" next to
     // "Speakers (Steam Streaming Microphone)", "CABLE Output" next to "CABLE Input".
     if (auto adapter = control.device_property(render->second, PKEY_DeviceInterface_FriendlyName)) {
-      auto capture = control.find_device_id({{audio_control_t::match_field_e::adapter_friendly_name, *adapter}}, eCapture);
+      const audio_control_t::match_fields_list_t adapter_match {{audio_control_t::match_field_e::adapter_friendly_name, *adapter}};
+      auto capture = control.find_device_id(adapter_match, eCapture);
+      if (!capture) {
+        capture = control.find_device_id(adapter_match, eCapture, usable_states);
+      }
       if (capture) {
         endpoints.capture_id = capture->second;
+        endpoints.capture_disabled = !control.is_active(capture->second);
       }
     }
 
     return endpoints;
+  }
+
+  bool set_endpoint_enabled(const std::wstring &id, bool enabled) {
+    audio_control_t control;
+    if (control.init()) {
+      return false;
+    }
+
+    auto status = control.policy->SetEndpointVisibility(id.c_str(), enabled ? TRUE : FALSE);
+    if (FAILED(status)) {
+      BOOST_LOG(warning) << "Couldn't "sv << (enabled ? "enable"sv : "disable"sv) << " audio endpoint: 0x"sv << util::hex(status).to_string_view();
+      return false;
+    }
+
+    return true;
   }
 
   std::wstring default_capture_id(int role) {
@@ -1264,7 +1302,8 @@ namespace platf::audio {
 
   void install_steam_microphone_if_missing() {
     audio_control_t control;
-    if (control.init() || control.find_device_id(control.match_steam_microphone())) {
+    // Disabled counts as installed: reinstalling over it fails (ERROR_NO_MORE_ITEMS)
+    if (control.init() || control.find_device_id(control.match_steam_microphone(), eRender, usable_states)) {
       return;
     }
 
@@ -1289,7 +1328,9 @@ namespace platf {
 
     // Install Steam Streaming Speakers if needed. We do this during audio_control() to ensure
     // the sink information returned includes the new Steam Streaming Speakers device.
-    if (config::audio.install_steam_drivers && !control->find_device_id(control->match_steam_speakers())) {
+    // Disabled speakers are installed: trying again only fails with ERROR_NO_MORE_ITEMS on every stream
+    if (config::audio.install_steam_drivers &&
+        !control->find_device_id(control->match_steam_speakers(), eRender, audio::usable_states)) {
       // This is best effort. Don't fail if it doesn't work.
       control->install_steam_audio_drivers();
     }

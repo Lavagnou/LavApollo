@@ -30,8 +30,9 @@ namespace mic_passthrough {
   std::string_view to_string(state_e state);
 
   /**
-   * @brief The state for a client holding `perm`. The device lookup is cached for a few seconds:
-   *        clients poll `serverinfo`.
+   * @brief The state for a client holding `perm`. Never touches the audio stack: the device check
+   *        is refreshed every few seconds by `init()`'s thread, and serverinfo runs on the HTTPS
+   *        thread, which must never block.
    */
   state_e state(crypto::PERM perm);
 
@@ -55,8 +56,9 @@ namespace mic_passthrough {
   void submit(const void *owner, std::string_view payload);
 
   /**
-   * @brief At startup: installs Steam Streaming Microphone in the background if it is the
-   *        configured device, the Steam audio drivers may be installed, and it is missing.
+   * @brief At startup, on a background thread: installs Steam Streaming Microphone if it is the
+   *        configured device, the Steam audio drivers may be installed, and it is missing; then
+   *        keeps checking whether the virtual microphone exists, which is what `state()` reports.
    */
-  void install_driver_if_needed();
+  void init();
 }  // namespace mic_passthrough
