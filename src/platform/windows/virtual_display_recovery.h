@@ -51,6 +51,9 @@ namespace VDISPLAY::recovery {
   /**
    * @brief Stop watching. Must be called before the displays are removed on purpose,
    *        or the monitor would put them straight back.
+   * @details Returns within about two seconds even if the monitor is stuck inside a Windows
+   *          display call, which then finishes on its own and does nothing more. Callers run on
+   *          HTTPS request threads: an unbounded wait here takes the host offline.
    */
   void stop();
 }  // namespace VDISPLAY::recovery

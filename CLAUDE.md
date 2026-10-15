@@ -112,6 +112,15 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
   already go away through SudoVDA's own watchdog once its pings stop.
   - ⚠️ `VDISPLAY::recovery::stop()` **must run before any deliberate `removeVirtualDisplay()`**
     (`proc_t::terminate()` does it first), or the monitor puts the display straight back.
+  - ⚠️ **`stop()` runs on HTTPS request threads** (`/cancel` and `/launch` reach `terminate()`): any
+    wait in it takes the whole nvhttp HTTPS server down with it, and every client then sees the host
+    as **offline** while it is still running (v2.2.0 shipped exactly that). So it waits at most 2 s,
+    then detaches a monitor stuck in a Windows display call; a detached monitor checks its stop token
+    before acting and exits on its own. `test_virtual_display_recovery_stop.cpp` holds both cases.
+  - ⚠️ **`cv.wait_for(lock, stop_token, rel_time, pred)` returns `pred()`, not "stop requested".**
+    With a `[] { return false; }` predicate it reports `false` even after `request_stop()`: the
+    monitor's wait used that result and spun forever on `EnumDisplayDevicesW` once stopped. Read
+    `stop_token.stop_requested()` after the wait.
   - ⚠️ **`proc_t::display_name` is behind a lock now** (`get_display_name()` / `set_display_name()`):
     `execute()`, the capture thread's fallback and the recovery monitor all write it, the capture
     thread reads it on every reinit. The capture reinit reads it **once per attempt**, so a rename by
