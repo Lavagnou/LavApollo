@@ -30,6 +30,7 @@
 #include "globals.h"
 #include "httpcommon.h"
 #include "logging.h"
+#include "mic_passthrough.h"
 #include "network.h"
 #include "nvhttp.h"
 #include "platform/common.h"
@@ -253,6 +254,7 @@ namespace nvhttp {
         named_cert_node["uuid"] = named_cert_p->uuid;
         named_cert_node["display_mode"] = named_cert_p->display_mode;
         named_cert_node["perm"] = static_cast<uint32_t>(named_cert_p->perm);
+        named_cert_node["perm_version"] = 2;
         named_cert_node["enable_legacy_ordering"] = named_cert_p->enable_legacy_ordering;
         named_cert_node["allow_client_commands"] = named_cert_p->allow_client_commands;
         named_cert_node["always_use_virtual_display"] = named_cert_p->always_use_virtual_display;
@@ -350,6 +352,16 @@ namespace nvhttp {
         named_cert_p->uuid = el.value("uuid", "");
         named_cert_p->display_mode = el.value("display_mode", "");
         named_cert_p->perm = (PERM)(util::get_non_string_json_value<uint32_t>(el, "perm", (uint32_t)PERM::_all)) & PERM::_all;
+        // The microphone permission came after these devices were saved. A device already trusted
+        // with every operation the UI shows gets it too, once: "perm_version" records the migration,
+        // so unticking it afterwards sticks.
+        if (el.value("perm_version", 1) < 2) {
+          constexpr auto shown_operations = static_cast<uint32_t>(PERM::clipboard_set) | static_cast<uint32_t>(PERM::clipboard_read) | static_cast<uint32_t>(PERM::server_cmd);
+          auto perm = static_cast<uint32_t>(named_cert_p->perm);
+          if ((perm & shown_operations) == shown_operations) {
+            named_cert_p->perm = static_cast<PERM>(perm | static_cast<uint32_t>(PERM::microphone));
+          }
+        }
         named_cert_p->enable_legacy_ordering = el.value("enable_legacy_ordering", true);
         named_cert_p->allow_client_commands = el.value("allow_client_commands", true);
         named_cert_p->always_use_virtual_display = el.value("always_use_virtual_display", false);
@@ -592,6 +604,7 @@ namespace nvhttp {
     launch_session->virtual_display = util::from_view(get_arg(args, "virtualDisplay", "0")) || named_cert_p->always_use_virtual_display;
     launch_session->scale_factor = util::from_view(get_arg(args, "scaleFactor", "100"));
     launch_session->client_vrr_requested = util::from_view(get_arg(args, "clientVrrRequested", "0"));
+    launch_session->mic_requested = util::from_view(get_arg(args, "clientMicRequested", "0"));
 
 #ifdef _WIN32
     // Validated against the mode parsed above, so an admin-side display_mode override for
@@ -1100,6 +1113,10 @@ namespace nvhttp {
       // layout instead, which works but is not what the client asked for -- so the client
       // warns rather than leaving the user to wonder where their second screen went.
       tree.put("root.MultiDisplayCapable", true);
+
+      // Whether this client's microphone would be heard, and if not why: the client sends
+      // `clientMicRequested=1` only when it is "ready", and otherwise says what to fix.
+      tree.put("root.MicPassthroughState", std::string {mic_passthrough::to_string(mic_passthrough::state(named_cert_p->perm))});
     #endif
     } else {
       tree.put("root.mac", "00:00:00:00:00:00");

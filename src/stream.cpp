@@ -29,6 +29,7 @@ extern "C" {
 #include "host_stats.h"
 #include "input.h"
 #include "logging.h"
+#include "mic_passthrough.h"
 #include "network.h"
 #include "platform/common.h"
 #include "process.h"
@@ -67,6 +68,7 @@ extern "C" {
 #define IDX_SET_CLIPBOARD 16
 #define IDX_FILE_TRANSFER_NONCE_REQUEST 17
 #define IDX_SET_ADAPTIVE_TRIGGERS 18
+#define IDX_MICROPHONE_DATA 19
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -88,6 +90,7 @@ static const short packetTypes[] = {
   0x3001,  // Set Clipboard (Apollo protocol extension)
   0x3002,  // File transfer nonce request (Apollo protocol extension)
   0x5503,  // Set Adaptive triggers (Sunshine protocol extension)
+  0x3080,  // Microphone data (LavArtemis protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -452,6 +455,12 @@ namespace stream {
     std::string device_name;
     std::string device_uuid;
     crypto::PERM permission;
+
+    // Client microphone passthrough (mic_passthrough.h)
+    struct {
+      bool requested;  ///< The client asked to send its microphone
+      std::atomic_bool active;  ///< This session holds the virtual microphone; read by the control thread
+    } mic;
 
     std::list<crypto::command_entry_t> do_cmds;
     std::list<crypto::command_entry_t> undo_cmds;
@@ -1130,6 +1139,23 @@ namespace stream {
       } else {
         BOOST_LOG(error) << "Invalid server command index: " << (int)cmdIndex;
       }
+    });
+
+    server->map(packetTypes[IDX_MICROPHONE_DATA], [](session_t *session, const std::string_view &payload) {
+      // Voice is only accepted from the encrypted control stream: with the legacy protocol it
+      // would have crossed the network in the clear.
+      if (session->config.controlProtocolType != 13 || !session->mic.active) {
+        return;
+      }
+
+      // Checked on every frame: revoking the permission mid-stream silences the client at once
+      if (!(session->permission & crypto::PERM::microphone)) {
+        return;
+      }
+
+#ifdef _WIN32
+      mic_passthrough::submit(session, payload);
+#endif
     });
 
     server->map(packetTypes[IDX_SET_CLIPBOARD], [server](session_t *session, const std::string_view &payload) {
@@ -2379,6 +2405,14 @@ namespace stream {
       BOOST_LOG(debug) << "Waiting for control to end..."sv;
       session.controlEnd.view();
 
+#ifdef _WIN32
+      // The control thread is gone, so no microphone frame can arrive any more
+      if (session.mic.active) {
+        mic_passthrough::release(&session);
+        session.mic.active = false;
+      }
+#endif
+
       if (!session.config.monitor.input_only) {
         session_history::end_session(session.history_uuid);
         host_stats::rtsp_session_ended();
@@ -2519,6 +2553,11 @@ namespace stream {
         });
         platf::frame_limiter_streaming_start(platf::frame_limiter_owner::rtsp, policy);
       }
+
+      // The first session that asks holds the virtual microphone until it ends
+      if (session.mic.requested) {
+        session.mic.active = mic_passthrough::acquire(&session, session.device_name);
+      }
 #endif
 
       if (!session.do_cmds.empty()) {
@@ -2554,6 +2593,9 @@ namespace stream {
       session->device_name = launch_session.device_name;
       session->device_uuid = launch_session.unique_id;
       session->permission = launch_session.perm;
+      session->mic.requested = launch_session.mic_requested && config::audio.mic_passthrough &&
+                               !!(launch_session.perm & crypto::PERM::microphone);
+      session->mic.active.store(false);
 
       session->do_cmds = std::move(launch_session.client_do_cmds);
       session->undo_cmds = std::move(launch_session.client_undo_cmds);

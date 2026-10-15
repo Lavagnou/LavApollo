@@ -2141,6 +2141,7 @@
     "clipboard_set": "Set clipboard",
     "clipboard_read": "Read clipboard",
     "server_cmd": "Run server commands",
+    "microphone": "Send their microphone",
     "input_controller": "Controller input",
     "input_touch": "Touch input",
     "input_pen": "Pen input",

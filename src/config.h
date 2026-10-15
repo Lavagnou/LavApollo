@@ -163,6 +163,9 @@ namespace config {
     bool install_steam_drivers;
     bool keep_default;
     bool auto_capture;
+    bool mic_passthrough;  ///< Accept client microphones (each client still opts in)
+    std::string mic_sink;  ///< Render endpoint client microphones are played into; empty = Steam Streaming Microphone
+    bool mic_set_default;  ///< Make that device's capture side the default microphone while streaming
   };
 
   constexpr int ENCRYPTION_MODE_NEVER = 0;  // Never use video encryption, even if the client supports it

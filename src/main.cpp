@@ -18,6 +18,7 @@
 #include "httpcommon.h"
 #include "logging.h"
 #include "main.h"
+#include "mic_passthrough.h"
 #include "network.h"
 #include "nvhttp.h"
 #include "process.h"
@@ -354,6 +355,11 @@ int main(int argc, char *argv[]) {
   if (!platf_deinit_guard) {
     BOOST_LOG(error) << "Platform failed to initialize"sv;
   }
+
+#ifdef _WIN32
+  // Client microphones are played into Steam Streaming Microphone: install it like the speakers
+  mic_passthrough::install_driver_if_needed();
+#endif
 
   auto proc_deinit_guard = proc::init();
   if (!proc_deinit_guard) {

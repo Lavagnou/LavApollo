@@ -382,6 +382,18 @@ export const generatedCategories: SettingsCategory[] = [
             "kind": "boolean"
           },
           {
+            "key": "mic_passthrough",
+            "kind": "boolean"
+          },
+          {
+            "key": "mic_sink",
+            "kind": "text"
+          },
+          {
+            "key": "mic_set_default",
+            "kind": "boolean"
+          },
+          {
             "key": "adapter_name",
             "kind": "text"
           },
@@ -1464,6 +1476,9 @@ export const generatedDefaults: Record<string, unknown> = {
   "install_steam_audio_drivers": true,
   "keep_sink_default": true,
   "auto_capture_sink": true,
+  "mic_passthrough": true,
+  "mic_sink": "",
+  "mic_set_default": true,
   "adapter_name": "",
   "output_name": "",
   "isolated_virtual_display_option": false,

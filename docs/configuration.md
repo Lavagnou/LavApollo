@@ -1259,6 +1259,84 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
 </table>
 
+### mic_passthrough
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Accept the microphone of clients that ask to send it (LavArtemis, "Microphone passthrough",
+            off by default on the client). The voice is played into a virtual microphone on this PC, so voice chat
+            and games can use it. Each client also needs the "Microphone" permission.
+            @note{This option is only supported on Windows.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            mic_passthrough = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### mic_sink
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            The playback device client microphones are played into. Its recording side is the microphone that
+            applications see. If unset, Steam Streaming Microphone is used (installed with the Steam audio drivers).
+            Any other virtual cable works, e.g. `CABLE Input` for VB-Cable.
+            @note{This option is only supported on Windows.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            Steam Streaming Microphone
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            mic_sink = CABLE Input
+            @endcode</td>
+    </tr>
+</table>
+
+### mic_set_default
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            While a client microphone is streaming, make the virtual microphone the default recording device
+            (also for communications), then restore the previous default. Games with proximity chat often only use the
+            default microphone.
+            @note{This option is only supported on Windows.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            mic_set_default = disabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### adapter_name
 
 <table>

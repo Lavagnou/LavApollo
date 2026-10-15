@@ -59,7 +59,8 @@ namespace crypto {
     file_upload      = _operation << 2,  // Allow upload files to host
     file_dwnload     = _operation << 3,  // Allow download files from host
     server_cmd       = _operation << 4,  // Allow execute server cmd
-    _all_opeiations  = clipboard_set | clipboard_read | file_upload | file_dwnload | server_cmd,
+    microphone       = _operation << 5,  // Allow the client's microphone to be played into the host's virtual microphone
+    _all_opeiations  = clipboard_set | clipboard_read | file_upload | file_dwnload | server_cmd | microphone,
 
     _action          = _operation << 8,  // Action permission group
     list             = _action << 0,     // Allow list apps

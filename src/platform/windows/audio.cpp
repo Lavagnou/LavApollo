@@ -16,6 +16,7 @@
 #include <synchapi.h>
 
 // local includes
+#include "audio_endpoints.h"
 #include "misc.h"
 #include "src/config.h"
 #include "src/logging.h"
@@ -40,6 +41,7 @@ namespace {
 
   constexpr auto SAMPLE_RATE = 48000;
   constexpr auto STEAM_AUDIO_DRIVER_PATH = L"%CommonProgramFiles(x86)%\\Steam\\drivers\\Windows10\\" STEAM_DRIVER_SUBDIR L"\\SteamStreamingSpeakers.inf";
+  constexpr auto STEAM_MIC_DRIVER_PATH = L"%CommonProgramFiles(x86)%\\Steam\\drivers\\Windows10\\" STEAM_DRIVER_SUBDIR L"\\SteamStreamingMicrophone.inf";
 
   constexpr auto waveformat_mask_stereo = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
 
@@ -896,6 +898,14 @@ namespace platf::audio {
       };
     }
 
+    /// Both endpoints of Steam's virtual microphone share this adapter name: "Speakers (...)" is
+    /// played into, "Microphone (...)" is what applications record from.
+    audio_control_t::match_fields_list_t match_steam_microphone() {
+      return {
+        {match_field_e::adapter_friendly_name, L"Steam Streaming Microphone"}
+      };
+    }
+
     audio_control_t::match_fields_list_t match_all_fields(const std::wstring &name) {
       return {
         {match_field_e::device_id, name},  // {0.0.0.00000000}.{29dd7668-45b2-4846-882d-950f55bf7eb8}
@@ -908,15 +918,16 @@ namespace platf::audio {
     /**
      * @brief Search for currently present audio device_id using multiple match fields.
      * @param match_list Pairs of match fields and values
+     * @param flow Playback (`eRender`) or recording (`eCapture`) endpoints
      * @return Optional pair of matched field and device_id
      */
-    std::optional<matched_field_t> find_device_id(const match_fields_list_t &match_list) {
+    std::optional<matched_field_t> find_device_id(const match_fields_list_t &match_list, EDataFlow flow = eRender) {
       if (match_list.empty()) {
         return std::nullopt;
       }
 
       collection_t collection;
-      auto status = device_enum->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection);
+      auto status = device_enum->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection);
       if (FAILED(status)) {
         BOOST_LOG(error) << "Couldn't enumerate: [0x"sv << util::hex(status).to_string_view() << ']';
         return std::nullopt;
@@ -1046,6 +1057,22 @@ namespace platf::audio {
      * @return `true` if installation was successful.
      */
     bool install_steam_audio_drivers() {
+      return install_steam_driver(STEAM_AUDIO_DRIVER_PATH, "Steam Streaming Speakers"sv, eRender);
+    }
+
+    /**
+     * @brief Installs the Steam Streaming Microphone driver, if present. It ships next to the
+     *        speakers driver and is what client microphones are played into.
+     * @return `true` if installation was successful.
+     */
+    bool install_steam_microphone_driver() {
+      return install_steam_driver(STEAM_MIC_DRIVER_PATH, "Steam Streaming Microphone"sv, eCapture);
+    }
+
+    /**
+     * @brief Installs one of Steam's audio drivers, keeping the default device of `flow` as it was.
+     */
+    bool install_steam_driver(const wchar_t *inf_path, std::string_view device_name, EDataFlow flow) {
 #ifdef STEAM_DRIVER_SUBDIR
       // MinGW's libnewdev.a is missing DiInstallDriverW() even though the headers have it,
       // so we have to load it at runtime. It's Vista or later, so it will always be available.
@@ -1065,20 +1092,21 @@ namespace platf::audio {
       }
 
       // Get the current default audio device (if present)
-      auto old_default_dev = default_device(device_enum);
+      device_t old_default_dev;
+      device_enum->GetDefaultAudioEndpoint(flow, eConsole, &old_default_dev);
 
-      // Install the Steam Streaming Speakers driver
+      // Install the driver
       WCHAR driver_path[MAX_PATH] = {};
-      ExpandEnvironmentStringsW(STEAM_AUDIO_DRIVER_PATH, driver_path, ARRAYSIZE(driver_path));
+      ExpandEnvironmentStringsW(inf_path, driver_path, ARRAYSIZE(driver_path));
       if (fn_DiInstallDriverW(nullptr, driver_path, 0, nullptr)) {
-        BOOST_LOG(info) << "Successfully installed Steam Streaming Speakers"sv;
+        BOOST_LOG(info) << "Successfully installed "sv << device_name;
 
         // Wait for 5 seconds to allow the audio subsystem to reconfigure things before
         // modifying the default audio device or enumerating devices again.
         Sleep(5000);
 
         // If there was a previous default device, restore that original device as the
-        // default output device just in case installing the new one changed it.
+        // default device just in case installing the new one changed it.
         if (old_default_dev) {
           audio::wstring_t old_default_id;
           old_default_dev->GetId(&old_default_id);
@@ -1093,7 +1121,7 @@ namespace platf::audio {
         auto err = GetLastError();
         switch (err) {
           case ERROR_ACCESS_DENIED:
-            BOOST_LOG(warning) << "Administrator privileges are required to install Steam Streaming Speakers"sv;
+            BOOST_LOG(warning) << "Administrator privileges are required to install "sv << device_name;
             break;
           case ERROR_FILE_NOT_FOUND:
           case ERROR_PATH_NOT_FOUND:
@@ -1107,7 +1135,7 @@ namespace platf::audio {
         return false;
       }
 #else
-      BOOST_LOG(warning) << "Unable to install Steam Streaming Speakers on unknown architecture"sv;
+      BOOST_LOG(warning) << "Unable to install "sv << device_name << " on unknown architecture"sv;
       return false;
 #endif
     }
@@ -1146,10 +1174,103 @@ namespace platf::audio {
     ~audio_control_t() override {
     }
 
+    /**
+     * @brief Reads a string property of an endpoint.
+     */
+    std::optional<std::wstring> device_property(const std::wstring &device_id, const PROPERTYKEY &key) {
+      device_t device;
+      if (FAILED(device_enum->GetDevice(device_id.c_str(), &device))) {
+        return std::nullopt;
+      }
+
+      prop_t prop;
+      if (FAILED(device->OpenPropertyStore(STGM_READ, &prop))) {
+        return std::nullopt;
+      }
+
+      prop_var_t value;
+      if (FAILED(prop->GetValue(key, &value.prop)) || value.prop.vt != VT_LPWSTR || !value.prop.pwszVal) {
+        return std::nullopt;
+      }
+
+      return std::wstring {value.prop.pwszVal};
+    }
+
     policy_t policy;
     audio::device_enum_t device_enum;
     std::string assigned_sink;
   };
+
+  std::optional<mic_endpoints_t> find_mic_endpoints(const std::string &mic_sink) {
+    audio_control_t control;
+    if (control.init()) {
+      return std::nullopt;
+    }
+
+    auto render = control.find_device_id(
+      mic_sink.empty() ? control.match_steam_microphone() : control.match_all_fields(from_utf8(mic_sink)),
+      eRender
+    );
+    if (!render) {
+      return std::nullopt;
+    }
+
+    mic_endpoints_t endpoints;
+    endpoints.render_id = render->second;
+    endpoints.name = to_utf8(control.device_property(render->second, PKEY_Device_FriendlyName).value_or(render->second));
+
+    // The recording side lives on the same adapter: "Microphone (Steam Streaming Microphone)" next to
+    // "Speakers (Steam Streaming Microphone)", "CABLE Output" next to "CABLE Input".
+    if (auto adapter = control.device_property(render->second, PKEY_DeviceInterface_FriendlyName)) {
+      auto capture = control.find_device_id({{audio_control_t::match_field_e::adapter_friendly_name, *adapter}}, eCapture);
+      if (capture) {
+        endpoints.capture_id = capture->second;
+      }
+    }
+
+    return endpoints;
+  }
+
+  std::wstring default_capture_id(int role) {
+    audio_control_t control;
+    if (control.init()) {
+      return {};
+    }
+
+    device_t device;
+    if (FAILED(control.device_enum->GetDefaultAudioEndpoint(eCapture, (ERole) role, &device))) {
+      return {};
+    }
+
+    wstring_t id;
+    device->GetId(&id);
+    return id ? std::wstring {id.get()} : std::wstring {};
+  }
+
+  bool set_default_capture(const std::wstring &id, int role) {
+    audio_control_t control;
+    if (control.init()) {
+      return false;
+    }
+
+    auto status = control.policy->SetDefaultEndpoint(id.c_str(), (ERole) role);
+    if (FAILED(status)) {
+      BOOST_LOG(warning) << "Couldn't set the default microphone for role ["sv << role << "]: 0x"sv << util::hex(status).to_string_view();
+      return false;
+    }
+
+    return true;
+  }
+
+  void install_steam_microphone_if_missing() {
+    audio_control_t control;
+    if (control.init() || control.find_device_id(control.match_steam_microphone())) {
+      return;
+    }
+
+    // Best effort, like the speakers driver: without Steam there is nothing to install.
+    control.install_steam_microphone_driver();
+  }
 }  // namespace platf::audio
 
 namespace platf {

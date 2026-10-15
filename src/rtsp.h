@@ -104,6 +104,8 @@ namespace rtsp_stream {
     // /launch or /resume): virtual displays refresh at 1000 Hz so each frame is captured within
     // a millisecond of the game presenting it, and capture queues stay minimal.
     bool client_vrr_requested = false;
+    // The client asked to send its microphone (`clientMicRequested=1`, LavArtemis)
+    bool mic_requested = false;
     uint32_t scale_factor;
 
     // Remote Monitor: the display this session captures on its own (see video::config_t), and

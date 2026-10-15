@@ -356,6 +356,47 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
   library. It does **not** recognise passwords or tokens: never add a file that holds credentials
   (`credentials_file`, `file_state`, keys) to the bundle.
 
+- **Client microphone passthrough** (`config.mic_passthrough`, default on; `mic_sink`, `mic_set_default`;
+  `docs/mic-passthrough.md`). A LavArtemis client that opts in (off by default on the client) sends its
+  microphone, which the host plays into a virtual microphone (Steam Streaming Microphone, or `mic_sink`)
+  for voice chat and proximity chat. Written for LavArtemis; the open Apollo PR #1428 had the idea of
+  Steam's microphone, not the transport.
+  - **Transport: the encrypted control stream, not a UDP port.** Control message `0x3080`
+    (`IDX_MICROPHONE_DATA`, LavArtemis range: Apollo is at `0x3000-0x3002`), payload `u16 LE seq | u32 LE
+    timestamp | Opus frame (48 kHz mono, 20 ms)`, unsequenced on ENet channel 9. It arrives already
+    decrypted and authenticated by `IDX_ENCRYPTED`; the handler also refuses anything when
+    `controlProtocolType != 13`, so voice never crosses the network in the clear. A dedicated port would
+    have meant a firewall rule, a NAT hole, its own crypto (Apollo #1428 reuses the audio IVs with the same
+    key) and finding the session by IP. The client side is `LiSendMicrophoneData()` in
+    `Lavagnou/moonlight-common-c`.
+  - **Negotiation.** `serverinfo` publishes `MicPassthroughState` per paired client: `ready` / `disabled` /
+    `no_permission` / `no_device` (`mic_passthrough::state()`, device lookup cached 5 s since clients poll).
+    The client sends `clientMicRequested=1` only on `ready`, and warns with the reason otherwise.
+  - **Permission `PERM::microphone`** (`_operation << 5`, `0x00200000`), checked at launch **and on every
+    frame**, so unticking it silences a client mid-stream. Devices saved before it existed get it once if
+    they hold every operation the UI shows (`clipboard_set | clipboard_read | server_cmd`); the per-device
+    `"perm_version": 2` written by `save_state()` records that, so unticking it afterwards sticks.
+  - **One owner.** The first session that asks holds the virtual microphone (`mic_passthrough::acquire()`
+    in `session::start()`), until `join()` releases it once the control thread is gone. Others are ignored
+    with a log line.
+  - **Playback** (`src/platform/windows/mic_passthrough.cpp`): Opus decode, loss rebuilt from the next
+    frame's in-band FEC (one frame) and PLC (more, up to 5), then WASAPI shared mode, event driven, in
+    **mono float 48 kHz with `AUTOCONVERTPCM`**. ⚠️ The device's own format is **never** changed (the
+    Apollo PR forces Steam's pair to 2 ch / 32-bit / 48 kHz): Windows converts.
+  - **Jitter buffer** (`src/mic_passthrough_policy.h`, tested in `test_mic_passthrough.cpp`): plays once
+    40 ms are buffered, re-primes after running dry, drops back to 40 ms past 150 ms. The client's capture
+    clock never matches ours, so the overflow rule is what keeps latency bounded over a long session.
+    Late or duplicate frames (unsequenced) are dropped, never played out of order.
+  - **Default microphone.** With `mic_set_default`, the recording side (the capture endpoint on the same
+    adapter: "Microphone (Steam Streaming Microphone)", "CABLE Output") becomes the default for every
+    role while streaming. The previous default is restored per role, **unless** the user picked another
+    one meanwhile.
+  - **Driver.** `install_steam_audio_drivers` also installs `SteamStreamingMicrophone.inf` (next to the
+    speakers' INF in Steam's `drivers\Windows10\x64`), at startup on a background thread
+    (`mic_passthrough::install_driver_if_needed()`), only when `mic_sink` is empty.
+  - `find_device_id()` takes an `EDataFlow` (default `eRender`); `audio_endpoints.h` exposes the endpoint
+    lookups to `mic_passthrough.cpp`. Those need COM on the calling thread.
+
 ### PyroWave
 
 [PyroWave](https://github.com/Themaister/pyrowave) is an intra-only GPU wavelet codec (Vulkan compute,
