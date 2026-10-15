@@ -14,6 +14,10 @@ player as if they were sitting at the host.
   and *Microphone (Steam Streaming Microphone)*, which applications record from.
 - If the virtual microphone is disabled in Windows' Sound settings (Steam's pair often is), LavApollo
   enables it for the session and disables it again afterwards.
+- Steam Streaming Microphone passes audio from its playback side to its recording side without any
+  conversion, so both must use the same *Default Format*. Out of the box they don't (stereo 48 kHz
+  against mono 44.1 kHz), which turns voice into an unintelligible noise. LavApollo gives the playback
+  side the recording side's format for the session, then puts it back.
 - Any other virtual cable works: set *Virtual microphone device* to its playback side, e.g. `CABLE Input`
   for VB-Cable. Applications then record from `CABLE Output`.
 - While a microphone is streaming, the virtual microphone becomes Windows' default recording device,

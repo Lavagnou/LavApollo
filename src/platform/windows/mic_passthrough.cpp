@@ -262,6 +262,10 @@ namespace mic_passthrough {
       // Endpoints that were disabled in the Sound settings and that we enabled for the session
       std::vector<std::wstring> enabled_endpoints;
 
+      // An endpoint whose format we changed for the session, and the format to put back
+      std::wstring reformatted_endpoint;
+      std::vector<std::uint8_t> original_format;
+
       std::uint64_t frames = 0;
       std::uint64_t concealed = 0;
       std::uint64_t late = 0;
@@ -313,6 +317,58 @@ namespace mic_passthrough {
         std::this_thread::sleep_for(100ms);
       }
       return std::nullopt;
+    }
+
+    /**
+     * @brief Gives both sides of the virtual microphone the same format.
+     *
+     * Steam Streaming Microphone is a loopback that copies the playback side's samples to the
+     * recording side as raw bytes, with no conversion. Out of the box its playback side is stereo
+     * 48 kHz and its recording side mono 44.1 kHz, so applications read stereo as mono at the
+     * wrong rate: garbled, slowed-down, unintelligible voice. The playback side is ours (nobody
+     * else plays into a virtual microphone), so it takes the recording side's format; only if
+     * the driver refuses is the recording side changed instead. Windows converts our stream to
+     * whichever format results.
+     */
+    void match_formats(const platf::audio::mic_endpoints_t &endpoints, std::wstring &reformatted, std::vector<std::uint8_t> &original) {
+      if (endpoints.capture_id.empty()) {
+        return;
+      }
+
+      auto render_format = platf::audio::device_format(endpoints.render_id);
+      auto capture_format = platf::audio::device_format(endpoints.capture_id);
+      if (render_format.empty() || capture_format.empty() || platf::audio::same_device_format(render_format, capture_format)) {
+        return;
+      }
+
+      if (platf::audio::set_device_format(endpoints.render_id, capture_format)) {
+        reformatted = endpoints.render_id;
+        original = std::move(render_format);
+        BOOST_LOG(info) << "Microphone passthrough: playing at the recording side's format ("sv
+                        << platf::audio::device_format_to_string(capture_format) << ") for the session"sv;
+        return;
+      }
+
+      if (platf::audio::set_device_format(endpoints.capture_id, render_format)) {
+        reformatted = endpoints.capture_id;
+        original = std::move(capture_format);
+        BOOST_LOG(info) << "Microphone passthrough: recording at the playback side's format ("sv
+                        << platf::audio::device_format_to_string(render_format) << ") for the session"sv;
+        return;
+      }
+
+      BOOST_LOG(warning) << "Microphone passthrough: the two sides of ["sv << endpoints.name << "] use different formats ("sv
+                         << platf::audio::device_format_to_string(render_format) << " vs "sv
+                         << platf::audio::device_format_to_string(capture_format)
+                         << ") and neither could be changed; set both to the same Default Format in the Sound settings"sv;
+    }
+
+    void restore_format(std::wstring &reformatted, std::vector<std::uint8_t> &original) {
+      if (!reformatted.empty()) {
+        platf::audio::set_device_format(reformatted, original);
+      }
+      reformatted.clear();
+      original.clear();
     }
 
     void disable_endpoints(std::vector<std::wstring> &enabled) {
@@ -393,6 +449,14 @@ namespace mic_passthrough {
       return false;
     }
 
+    // Before the playback client exists: it is initialized against the device format
+    std::wstring reformatted;
+    std::vector<std::uint8_t> original_format;
+    match_formats(*endpoints, reformatted, original_format);
+    auto undo_format = util::fail_guard([&reformatted, &original_format]() {
+      restore_format(reformatted, original_format);
+    });
+
     int opus_error = OPUS_OK;
     std::unique_ptr<OpusDecoder, opus_decoder_free> decoder {opus_decoder_create(SAMPLE_RATE, 1, &opus_error)};
     if (opus_error != OPUS_OK || !decoder) {
@@ -413,6 +477,9 @@ namespace mic_passthrough {
     owner.frames = owner.concealed = owner.late = owner.dropped_samples = 0;
     owner.enabled_endpoints = std::move(enabled);
     undo_enable.disable();
+    owner.reformatted_endpoint = std::move(reformatted);
+    owner.original_format = std::move(original_format);
+    undo_format.disable();
 
     if (config::audio.mic_set_default) {
       if (endpoints->capture_id.empty()) {
@@ -440,6 +507,7 @@ namespace mic_passthrough {
     owner.renderer.reset();
     owner.decoder.reset();
     // Back to how the user left their Sound settings
+    restore_format(owner.reformatted_endpoint, owner.original_format);
     disable_endpoints(owner.enabled_endpoints);
     owner.session = nullptr;
 

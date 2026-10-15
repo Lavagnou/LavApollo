@@ -393,8 +393,15 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
     with a log line.
   - **Playback** (`src/platform/windows/mic_passthrough.cpp`): Opus decode, loss rebuilt from the next
     frame's in-band FEC (one frame) and PLC (more, up to 5), then WASAPI shared mode, event driven, in
-    **mono float 48 kHz with `AUTOCONVERTPCM`**. ⚠️ The device's own format is **never** changed (the
-    Apollo PR forces Steam's pair to 2 ch / 32-bit / 48 kHz): Windows converts.
+    **mono float 48 kHz with `AUTOCONVERTPCM`**: Windows converts to the device format.
+  - ⚠️ **Both sides of the virtual microphone must share one device format.** Steam Streaming
+    Microphone is a loopback that copies the playback side's samples to the recording side as raw bytes,
+    with no conversion, and out of the box its sides disagree (playback stereo 48 kHz, recording mono
+    44.1 kHz): applications then read stereo as mono at the wrong rate, and the voice comes out garbled
+    and unintelligible although every frame arrived (the 2.2.1 test). `match_formats()` gives the
+    playback side the recording side's format for the session (fallback: the other way round) and
+    `release()` puts the original back. Thinking "never touch the device format" was wrong: the Apollo
+    PR's normalisation of Steam's pair was there for this.
   - **Jitter buffer** (`src/mic_passthrough_policy.h`, tested in `test_mic_passthrough.cpp`): plays once
     40 ms are buffered, re-primes after running dry, drops back to 40 ms past 150 ms. The client's capture
     clock never matches ours, so the overflow rule is what keeps latency bounded over a long session.

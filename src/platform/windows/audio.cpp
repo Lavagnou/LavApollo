@@ -1300,6 +1300,78 @@ namespace platf::audio {
     return true;
   }
 
+  std::vector<std::uint8_t> device_format(const std::wstring &id) {
+    audio_control_t control;
+    if (control.init()) {
+      return {};
+    }
+
+    device_t device;
+    prop_t prop;
+    prop_var_t value;
+    if (FAILED(control.device_enum->GetDevice(id.c_str(), &device)) || FAILED(device->OpenPropertyStore(STGM_READ, &prop)) ||
+        FAILED(prop->GetValue(PKEY_AudioEngine_DeviceFormat, &value.prop)) || value.prop.vt != VT_BLOB ||
+        value.prop.blob.cbSize < sizeof(WAVEFORMATEX)) {
+      return {};
+    }
+
+    const auto *bytes = value.prop.blob.pBlobData;
+    return {bytes, bytes + value.prop.blob.cbSize};
+  }
+
+  bool set_device_format(const std::wstring &id, const std::vector<std::uint8_t> &format) {
+    if (format.size() < sizeof(WAVEFORMATEX)) {
+      return false;
+    }
+
+    audio_control_t control;
+    if (control.init()) {
+      return false;
+    }
+
+    // Undocumented API: hand it copies, as set_format() does
+    auto id_copy = id;
+    auto format_copy = format;
+    WAVEFORMATEXTENSIBLE mix {};
+    auto status = control.policy->SetDeviceFormat(id_copy.c_str(), reinterpret_cast<WAVEFORMATEX *>(format_copy.data()), reinterpret_cast<WAVEFORMATEX *>(&mix));
+    if (FAILED(status)) {
+      BOOST_LOG(debug) << "SetDeviceFormat failed: 0x"sv << util::hex(status).to_string_view();
+      return false;
+    }
+
+    return true;
+  }
+
+  bool same_device_format(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b) {
+    if (a.size() < sizeof(WAVEFORMATEX) || b.size() < sizeof(WAVEFORMATEX)) {
+      return false;
+    }
+
+    const auto &fa = *reinterpret_cast<const WAVEFORMATEX *>(a.data());
+    const auto &fb = *reinterpret_cast<const WAVEFORMATEX *>(b.data());
+    if (fa.wFormatTag != fb.wFormatTag || fa.nChannels != fb.nChannels || fa.nSamplesPerSec != fb.nSamplesPerSec ||
+        fa.wBitsPerSample != fb.wBitsPerSample) {
+      return false;
+    }
+
+    if (fa.wFormatTag == WAVE_FORMAT_EXTENSIBLE && a.size() >= sizeof(WAVEFORMATEXTENSIBLE) && b.size() >= sizeof(WAVEFORMATEXTENSIBLE)) {
+      const auto &xa = *reinterpret_cast<const WAVEFORMATEXTENSIBLE *>(a.data());
+      const auto &xb = *reinterpret_cast<const WAVEFORMATEXTENSIBLE *>(b.data());
+      return xa.Samples.wValidBitsPerSample == xb.Samples.wValidBitsPerSample && IsEqualGUID(xa.SubFormat, xb.SubFormat);
+    }
+
+    return true;
+  }
+
+  std::string device_format_to_string(const std::vector<std::uint8_t> &format) {
+    if (format.size() < sizeof(WAVEFORMATEX)) {
+      return "unknown";
+    }
+
+    const auto &f = *reinterpret_cast<const WAVEFORMATEX *>(format.data());
+    return std::to_string(f.nChannels) + " ch, " + std::to_string(f.nSamplesPerSec) + " Hz, " + std::to_string(f.wBitsPerSample) + "-bit";
+  }
+
   void install_steam_microphone_if_missing() {
     audio_control_t control;
     // Disabled counts as installed: reinstalling over it fails (ERROR_NO_MORE_ITEMS)

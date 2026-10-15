@@ -7,8 +7,10 @@
 #pragma once
 
 // standard includes
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace platf::audio {
   /**
@@ -35,6 +37,24 @@ namespace platf::audio {
    * @brief Enables or disables an endpoint, as the Sound settings' "Enable"/"Disable" do.
    */
   bool set_endpoint_enabled(const std::wstring &id, bool enabled);
+
+  /**
+   * @brief The format an endpoint's driver works in, in shared mode (`PKEY_AudioEngine_DeviceFormat`):
+   *        the raw WAVEFORMATEX(TENSIBLE) bytes, empty when unknown.
+   */
+  std::vector<std::uint8_t> device_format(const std::wstring &id);
+
+  /**
+   * @brief Changes that format, as the Sound settings' "Default Format" does.
+   */
+  bool set_device_format(const std::wstring &id, const std::vector<std::uint8_t> &format);
+
+  /**
+   * @brief Same channels, rate, sample size and sample type.
+   */
+  bool same_device_format(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b);
+
+  std::string device_format_to_string(const std::vector<std::uint8_t> &format);
 
   /**
    * @brief The default recording device for `role` (an `ERole`), or an empty string.
