@@ -476,6 +476,8 @@
     "remote_monitor_desc": "Adds a \"Remote Monitor\" entry to the app list. Launching it from another device makes that device an extra monitor of this PC, with a virtual display of its own streamed beside the main session (which keeps running). The display is removed when that device disconnects. Needs the virtual display driver.",
     "remote_monitor_mute_audio": "Remote Monitor without audio",
     "remote_monitor_mute_audio_desc": "Remote Monitor sessions carry no sound, so only the main session plays the host's audio.",
+    "benchmark_app": "Benchmark app for LavArtemis",
+    "benchmark_app_desc": "Lets LavArtemis clients run their benchmark: a hidden \"Benchmark\" app showing an animated scene that is identical on every run, which the client streams with one combination of codec, bitrate and frame pacing after another to score their latency and smoothness. It does not appear in the app list.",
     "realtime_stats_enabled": "Live Host Stats",
     "realtime_stats_enabled_desc": "Sample the host's CPU, GPU, memory and network for the dashboard and the session history. Disabled, the sampler stops and history samples carry no host metrics.",
     "realtime_stats_poll_interval_ms": "Live Host Stats Interval (ms)",

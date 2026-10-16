@@ -26,6 +26,8 @@ install(TARGETS audio-info RUNTIME DESTINATION "tools" COMPONENT audio)
 install(TARGETS sunshinesvc RUNTIME DESTINATION "tools" COMPONENT application)
 # Windows.Graphics.Capture from the service: ipc_session_t launches it from <install>/tools
 install(TARGETS sunshine_wgc_capture RUNTIME DESTINATION "tools" COMPONENT application)
+# The built-in "Benchmark" app runs it from <install>/tools (process.cpp)
+install(TARGETS lavapollo-benchmark-scene RUNTIME DESTINATION "tools" COMPONENT application)
 
 # Drivers
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"

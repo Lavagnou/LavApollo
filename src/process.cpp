@@ -78,6 +78,7 @@ namespace proc {
   int input_only_app_id = -1;
   std::string input_only_app_id_str;
   int remote_monitor_app_id = -1;
+  int benchmark_app_id = -1;
   int terminate_app_id = -1;
   std::string terminate_app_id_str;
 
@@ -751,6 +752,9 @@ namespace proc {
     }
     _env["SUNSHINE_CLIENT_AUDIO_SURROUND_PARAMS"] = launch_session->surround_params;
     _env["APOLLO_CLIENT_AUDIO_SURROUND_PARAMS"] = launch_session->surround_params;
+    // The display capture reads (several joined by '+' for a multi-display layout), for an app
+    // that must put itself on it: the benchmark scene does
+    _env["LAVAPOLLO_CAPTURE_DISPLAY"] = this->get_display_name();
 
     if (!_app.output.empty() && _app.output != "null"sv) {
 #ifdef _WIN32
@@ -1831,6 +1835,50 @@ namespace proc {
         ctx.id = std::get<1>(possible_ids);
       }
       ids.insert(ctx.id);
+
+      apps.emplace_back(std::move(ctx));
+    }
+
+    // Benchmark entry: the animated scene LavArtemis clients stream while they compare their
+    // settings (docs/benchmark.md). Hidden from /applist, advertised in serverinfo instead.
+    benchmark_app_id = -1;
+    if (config::video.benchmark_app) {
+      std::wstring exe_path(MAX_PATH, L'\0');
+      exe_path.resize(GetModuleFileNameW(nullptr, exe_path.data(), MAX_PATH));
+      auto scene = std::filesystem::path(exe_path).parent_path() / L"tools" / L"lavapollo-benchmark-scene.exe";
+
+      proc::ctx_t ctx;
+      ctx.idx = std::to_string(i);
+      ctx.uuid = BENCHMARK_APP_UUID;
+      ctx.name = "Benchmark";
+      ctx.cmd = "\"" + platf::to_utf8(scene.wstring()) + "\"";
+      ctx.working_dir = platf::to_utf8(scene.parent_path().wstring());
+      ctx.image_path = parse_env_val(this_env, "virtual_desktop.png");
+      // The display the size and rate of the stream, like a game would get: a VRR client's
+      // runs then go through the same 1000 Hz display as its games
+      ctx.virtual_display = vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK;
+      ctx.virtual_display_primary = true;
+      ctx.scale_factor = 100;
+      ctx.use_app_identity = false;
+      ctx.per_client_app_identity = false;
+      ctx.allow_client_commands = false;
+      ctx.terminate_on_pause = false;
+
+      ctx.elevated = false;
+      ctx.auto_detach = false;
+      ctx.wait_all = true;
+      ctx.exit_timeout = 5s;
+
+      auto possible_ids = calculate_app_id(ctx.name, ctx.image_path, i++);
+      if (ids.count(std::get<0>(possible_ids)) == 0) {
+        ctx.id = std::get<0>(possible_ids);
+      }
+      else {
+        ctx.id = std::get<1>(possible_ids);
+      }
+      ids.insert(ctx.id);
+
+      benchmark_app_id = util::from_view(ctx.id);
 
       apps.emplace_back(std::move(ctx));
     }

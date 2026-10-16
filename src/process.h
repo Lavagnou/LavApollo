@@ -40,6 +40,7 @@
 #define REMOTE_INPUT_UUID "8CB5C136-DA67-4F99-B4A1-F9CD35005CF4"
 #define TERMINATE_APP_UUID "E16CBE1B-295D-4632-9A76-EC4180C857D3"
 #define REMOTE_MONITOR_UUID "5B8B5BB5-2A6D-4C4E-9E41-3F8C0D6E7A11"
+#define BENCHMARK_APP_UUID "B3C4F1A2-7E5D-4B8A-9C61-2D0E8F4A6B37"
 
 namespace proc {
   using file_t = util::safe_ptr_v2<FILE, int, fclose>;
@@ -215,6 +216,8 @@ namespace proc {
   extern int input_only_app_id;
   extern std::string input_only_app_id_str;
   extern int remote_monitor_app_id;
+  /// The built-in "Benchmark" app (`config::video.benchmark_app`), -1 when not offered
+  extern int benchmark_app_id;
 
 #ifdef _WIN32
   /**

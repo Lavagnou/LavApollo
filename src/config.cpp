@@ -444,6 +444,7 @@ namespace config {
     true, // vrr_virtual_display_refresh
     true, // remote_monitor
     false, // remote_monitor_mute_audio
+    true, // benchmark_app
 
     28,  // qp
 
@@ -1144,6 +1145,7 @@ namespace config {
     bool_f(vars, "vrr_virtual_display_refresh", video.vrr_virtual_display_refresh);
     bool_f(vars, "remote_monitor", video.remote_monitor);
     bool_f(vars, "remote_monitor_mute_audio", video.remote_monitor_mute_audio);
+    bool_f(vars, "benchmark_app", video.benchmark_app);
     int_f(vars, "qp", video.qp);
     int_between_f(vars, "hevc_mode", video.hevc_mode, {0, 3});
     int_between_f(vars, "av1_mode", video.av1_mode, {0, 3});

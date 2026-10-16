@@ -2018,6 +2018,29 @@ Please note that pause command will not be executed when the session terminates.
     </tr>
 </table>
 
+### benchmark_app
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Lets LavArtemis clients run their benchmark: a hidden "Benchmark" app showing an animated scene that is identical on every run, which the client streams with one combination of codec, bitrate and frame pacing after another to score their latency and smoothness. It does not appear in the app list. See [the benchmark](benchmark.md).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            benchmark_app = enabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### frame_limiter_enable
 
 <table>

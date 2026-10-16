@@ -534,6 +534,10 @@ export const generatedCategories: SettingsCategory[] = [
             "kind": "boolean"
           },
           {
+            "key": "benchmark_app",
+            "kind": "boolean"
+          },
+          {
             "key": "frame_limiter_enable",
             "kind": "boolean"
           },
@@ -1502,6 +1506,7 @@ export const generatedDefaults: Record<string, unknown> = {
   "vrr_virtual_display_refresh": true,
   "remote_monitor": true,
   "remote_monitor_mute_audio": false,
+  "benchmark_app": true,
   "frame_limiter_enable": false,
   "frame_limiter_provider": "auto",
   "frame_limiter_fps_limit": 0,

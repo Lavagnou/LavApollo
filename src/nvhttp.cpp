@@ -1117,6 +1117,13 @@ namespace nvhttp {
       // Whether this client's microphone would be heard, and if not why: the client sends
       // `clientMicRequested=1` only when it is "ready", and otherwise says what to fix.
       tree.put("root.MicPassthroughState", std::string {mic_passthrough::to_string(mic_passthrough::state(named_cert_p->perm))});
+
+      // The hidden app LavArtemis benchmarks stream (docs/benchmark.md). Absent when the host
+      // does not offer it, so the client knows to say so instead of picking another app.
+      if (proc::benchmark_app_id > 0) {
+        tree.put("root.BenchmarkAppId", proc::benchmark_app_id);
+        tree.put("root.BenchmarkAppUuid", BENCHMARK_APP_UUID);
+      }
     #endif
     } else {
       tree.put("root.mac", "00:00:00:00:00:00");
@@ -1324,6 +1331,15 @@ namespace nvhttp {
     sendPyroWaveProbeChunk(std::make_shared<pyrowave_probe_state_t>(pyrowave_probe_state_t {response, probe_bytes}));
   }
 
+  /**
+   * @brief The Benchmark app stays out of the app grid: clients launch it by the UUID serverinfo
+   *        gives. Except while it runs, so that a benchmark cut short can still be resumed or quit
+   *        from any client.
+   */
+  bool benchmark_app_listed(int appid, int current_appid, int benchmark_appid) {
+    return benchmark_appid <= 0 || appid != benchmark_appid || appid == current_appid;
+  }
+
   void applist(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1370,6 +1386,10 @@ namespace nvhttp {
           if (appid == proc::terminate_app_id) {
             continue;
           }
+        }
+
+        if (!benchmark_app_listed(appid, current_appid, proc::benchmark_app_id)) {
+          continue;
         }
 
         std::string app_name;

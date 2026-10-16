@@ -292,4 +292,13 @@ namespace nvhttp {
    * @return The requested displays, or an empty vector if absent or invalid.
    */
   std::vector<rtsp_stream::display_layout_rect_t> parse_display_layout(const std::string &layout, int canvas_width, int canvas_height);
+
+  /**
+   * @brief Whether /applist shows an app, as far as the hidden Benchmark app is concerned.
+   * @param appid The app being listed.
+   * @param current_appid The running app, 0 when none.
+   * @param benchmark_appid The Benchmark app's id, -1 when the host does not offer it.
+   * @return False only for the Benchmark app while it is not running.
+   */
+  bool benchmark_app_listed(int appid, int current_appid, int benchmark_appid);
 }  // namespace nvhttp

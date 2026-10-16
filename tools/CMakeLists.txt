@@ -53,3 +53,15 @@ target_link_libraries(sunshine_wgc_capture
         wtsapi32
         ${PLATFORM_LIBRARIES})
 target_compile_options(sunshine_wgc_capture PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
+
+# The scene of the built-in "Benchmark" app (process.cpp): an animated, deterministic image the
+# LavArtemis benchmark streams while it compares codecs, bitrates and pacing modes.
+add_executable(lavapollo-benchmark-scene WIN32 benchmark_scene.cpp)
+set_target_properties(lavapollo-benchmark-scene PROPERTIES CXX_STANDARD 23)
+target_link_libraries(lavapollo-benchmark-scene
+        d3d11
+        dxgi
+        d3dcompiler
+        user32
+        ${PLATFORM_LIBRARIES})
+target_compile_options(lavapollo-benchmark-scene PRIVATE ${SUNSHINE_COMPILE_OPTIONS})

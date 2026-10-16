@@ -424,6 +424,27 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
     active only); `audio_endpoints.h` exposes the endpoint lookups to `mic_passthrough.cpp`. Those need
     COM on the calling thread.
 
+- **Benchmark app** (`config.benchmark_app`, default on; `docs/benchmark.md`, the reference both
+  LavArtemis clients implement). A built-in app, **Benchmark** (`BENCHMARK_APP_UUID`), runs
+  `tools\lavapollo-benchmark-scene.exe` on a virtual display; the clients stream it once per combination
+  of codec, bitrate and pacing and score each one.
+  - ⚠️ **The scene is a function of the frame number only** (`tools/benchmark_scene.cpp`): animation
+    time is `n / rate`, never the wall clock, and a frame that misses its slot is skipped, not delayed.
+    That is what makes two runs comparable; anything time- or randomness-driven added to it breaks
+    the comparison between runs and between reports.
+  - It paces itself at the stream rate rather than following the display: a VRR client's virtual
+    display refreshes at 1000 Hz. It covers the display capture reads, named by the
+    `LAVAPOLLO_CAPTURE_DISPLAY` variable `proc_t::execute()` exports (else the monitor the size of
+    the stream, else the primary one), and exits on `WM_CLOSE`. ⚠️ Matching by size alone could
+    pick a physical monitor of the same resolution: the stream would then show an idle desktop
+    and every run would encode next to nothing.
+  - **Hidden from `/applist` unless it is running** (`nvhttp::benchmark_app_listed()`, tested in
+    `test_benchmark_app.cpp`), advertised by `serverinfo` as `BenchmarkAppId` / `BenchmarkAppUuid`
+    instead. Listing it while it runs is deliberate: a benchmark cut short must still be resumable or
+    quittable from any client, including old ones.
+  - The client quits the app between runs whose VRR request differs: the 1000 Hz display only exists
+    if VRR was asked for at `/launch`, and `/resume` does not rebuild displays.
+
 ### PyroWave
 
 [PyroWave](https://github.com/Themaister/pyrowave) is an intra-only GPU wavelet codec (Vulkan compute,
