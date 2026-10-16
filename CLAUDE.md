@@ -53,8 +53,17 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
   - ⚠️ `displayLayout=` is untrusted input: `nvhttp::parse_display_layout()` (portable, tested in
     `tests/unit/test_display_layout.cpp`) parses with `std::from_chars` and caps every field at
     `MAX_LAYOUT_COORDINATE` (16384) *before* any addition — `atoi` + `x + width` used to overflow.
-  - If a display fails to come up **or** Windows refuses the arrangement, the session falls back to
-    one display covering the whole canvas (`fall_back_to_single_display` in `process.cpp`).
+  - If a display fails to come up **or** the displays do not end up arranged as requested, the
+    session falls back to one display covering the whole canvas (`fall_back_to_single_display` in
+    `process.cpp`).
+  - ⚠️ **"Arranged as requested" is judged on the result, not on `SetDisplayConfig`'s return code**
+    (`VDISPLAY::arrangementMatches()`, tested in `test_virtual_display_arrangement.cpp`). Windows
+    rejects a 1080p monitor above a 1920x515 bar display with error 87 every session. Up to 2.0 a
+    refusal was only logged and the two displays kept, and that layout worked for its user (Windows
+    restoring the arrangement it saved for those display identities is the likely reason). When the
+    audit fixes made any refusal fall back to a single display (2.1), multi-display broke for them. A refusal is now retried with the positions alone (each display keeps the mode
+    and refresh it was created with, `SDC_ALLOW_CHANGES`), then the real geometry is read back:
+    same relative positions, sizes within a pixel (a driver may round an odd mode) -> keep it.
   - `VDISPLAY::applyVirtualDisplayLayout()` places them in **one** `SetDisplayConfig` call —
     moving them one at a time passes through overlapping arrangements, which Windows refuses.
     ⚠️ It sets only their positions **relative to each other**; the block as a whole stays where it

@@ -51,6 +51,20 @@ namespace VDISPLAY {
 	 * @return ERROR_SUCCESS, or a Windows error code.
 	 */
 	LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refresh_rate);
+
+	struct PlacedDisplay {
+		int x;
+		int y;
+		int width;
+		int height;
+	};
+
+	/**
+	 * Whether displays placed at `actual` (in `requested`'s order) form the requested
+	 * arrangement: the same positions relative to each other, wherever the block sits as a
+	 * whole, and the same sizes give or take a pixel (a driver may round a mode).
+	 */
+	bool arrangementMatches(const std::vector<LayoutEntry>& requested, const std::vector<PlacedDisplay>& actual);
 	std::wstring getPrimaryDisplay();
 	bool setPrimaryDisplay(const wchar_t* primaryDeviceName);
 	bool getDisplayHDRByName(const wchar_t* displayName);

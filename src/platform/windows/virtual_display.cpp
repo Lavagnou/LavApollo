@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <vector>
@@ -317,6 +318,73 @@ LONG changeDisplaySettings(const wchar_t* deviceName, int width, int height, int
 	return changeDisplaySettings2(deviceName, width, height, refresh_rate);
 }
 
+bool arrangementMatches(const std::vector<LayoutEntry>& requested, const std::vector<PlacedDisplay>& actual) {
+	if (requested.empty() || requested.size() != actual.size()) {
+		return false;
+	}
+
+	const int origin_x = actual[0].x - requested[0].x;
+	const int origin_y = actual[0].y - requested[0].y;
+	for (size_t k = 0; k < requested.size(); k++) {
+		if (actual[k].x - requested[k].x != origin_x || actual[k].y - requested[k].y != origin_y) {
+			return false;
+		}
+		if (std::abs(actual[k].width - requested[k].width) > 1 || std::abs(actual[k].height - requested[k].height) > 1) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Where Windows has the layout's displays right now, in its order. False if one of them is
+ * not an active display.
+ */
+static bool queryPlacedDisplays(const std::vector<LayoutEntry>& layout, std::vector<PlacedDisplay>& placed) {
+	UINT32 pathCount = 0;
+	UINT32 modeCount = 0;
+	if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) {
+		return false;
+	}
+	std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+	std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+	if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr) != ERROR_SUCCESS) {
+		return false;
+	}
+
+	placed.assign(layout.size(), PlacedDisplay {});
+	std::vector<bool> found(layout.size(), false);
+	for (UINT32 i = 0; i < pathCount; i++) {
+		DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName = {};
+		sourceName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+		sourceName.header.size = sizeof(sourceName);
+		sourceName.header.adapterId = paths[i].sourceInfo.adapterId;
+		sourceName.header.id = paths[i].sourceInfo.id;
+		if (DisplayConfigGetDeviceInfo(&sourceName.header) != ERROR_SUCCESS) {
+			continue;
+		}
+
+		for (size_t k = 0; k < layout.size(); k++) {
+			if (std::wstring_view(sourceName.viewGdiDeviceName) != std::wstring_view(layout[k].deviceName)) {
+				continue;
+			}
+			for (UINT32 j = 0; j < modeCount; j++) {
+				if (modes[j].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE &&
+				    modes[j].adapterId.HighPart == paths[i].sourceInfo.adapterId.HighPart &&
+				    modes[j].adapterId.LowPart == paths[i].sourceInfo.adapterId.LowPart &&
+				    modes[j].id == paths[i].sourceInfo.id) {
+					const auto &mode = modes[j].sourceMode;
+					placed[k] = {mode.position.x, mode.position.y, (int) mode.width, (int) mode.height};
+					found[k] = true;
+					break;
+				}
+			}
+		}
+	}
+
+	return std::all_of(found.begin(), found.end(), [](bool f) { return f; });
+}
+
 LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refresh_rate) {
 	if (layout.empty()) {
 		return ERROR_INVALID_PARAMETER;
@@ -453,6 +521,14 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 		}
 	}
 
+	// What each display was created as, for the retry below
+	std::vector<DISPLAYCONFIG_SOURCE_MODE> createdModes;
+	std::vector<DISPLAYCONFIG_RATIONAL> createdRefresh;
+	for (size_t k = 0; k < layout.size(); k++) {
+		createdModes.push_back(modeArray[modeIndex[k]].sourceMode);
+		createdRefresh.push_back(pathArray[pathIndex[k]].targetInfo.refreshRate);
+	}
+
 	// Every rectangle moves in the same SetDisplayConfig call. Applying them one at a time
 	// would walk through intermediate arrangements where two displays overlap, and Windows
 	// rejects those rather than tolerating them in passing.
@@ -478,11 +554,61 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 	);
 
 	if (status != ERROR_SUCCESS) {
-		BOOST_LOG(warning) << "SUDOVDA: Windows rejected the requested display layout (error " << status << ')';
-		return status;
+		BOOST_LOG(warning) << "SUDOVDA: Windows rejected the requested display layout (error " << status
+		                   << "); retrying with the positions alone";
+
+		// Move the displays and nothing else: each keeps the mode and refresh it was created
+		// with, and Windows may adjust whatever else it needs to. A display whose mode the
+		// driver rounded (an odd height, say) no longer contradicts its own target mode.
+		for (size_t k = 0; k < layout.size(); k++) {
+			auto &sourceMode = modeArray[modeIndex[k]].sourceMode;
+			sourceMode.width = createdModes[k].width;
+			sourceMode.height = createdModes[k].height;
+			sourceMode.pixelFormat = createdModes[k].pixelFormat;
+			pathArray[pathIndex[k]].targetInfo.refreshRate = createdRefresh[k];
+		}
+
+		status = SetDisplayConfig(
+			pathCount,
+			pathArray.data(),
+			modeCount,
+			modeArray.data(),
+			SDC_APPLY
+			| SDC_USE_SUPPLIED_DISPLAY_CONFIG
+			| SDC_ALLOW_CHANGES
+			| SDC_SAVE_TO_DATABASE
+		);
+		if (status != ERROR_SUCCESS) {
+			BOOST_LOG(warning) << "SUDOVDA: Windows rejected the positions alone too (error " << status << ')';
+		}
 	}
 
-	BOOST_LOG(info) << "SUDOVDA: laid out " << layout.size() << " displays at " << base_x << ',' << base_y;
+	// What counts is where the displays ended up, not what the call returned. Windows can
+	// refuse the call yet restore an arrangement it saved for these displays (keyed on their
+	// identity) that is exactly the requested one -- which is how a layout Windows rejected
+	// with error 87 still worked up to 2.0, before a refusal started to mean falling back to a
+	// single display. And a call that succeeds proves nothing if Windows moved things after.
+	std::vector<PlacedDisplay> placed;
+	if (!queryPlacedDisplays(layout, placed)) {
+		return status != ERROR_SUCCESS ? status : ERROR_DEVICE_NOT_CONNECTED;
+	}
+
+	if (!arrangementMatches(layout, placed)) {
+		for (size_t k = 0; k < layout.size(); k++) {
+			BOOST_LOG(warning) << "SUDOVDA: " << platf::to_utf8(layout[k].deviceName) << " is "
+			                   << placed[k].width << 'x' << placed[k].height << " at " << placed[k].x << ',' << placed[k].y
+			                   << ", asked for " << layout[k].width << 'x' << layout[k].height
+			                   << " at " << layout[k].x << ',' << layout[k].y << " relative to the others";
+		}
+		return status != ERROR_SUCCESS ? status : ERROR_INVALID_PARAMETER;
+	}
+
+	if (status != ERROR_SUCCESS) {
+		BOOST_LOG(info) << "SUDOVDA: the displays are arranged as requested all the same";
+	}
+
+	BOOST_LOG(info) << "SUDOVDA: laid out " << layout.size() << " displays at " << placed[0].x - layout[0].x
+	                << ',' << placed[0].y - layout[0].y;
 
 	// Note: the layout's `primary` flag is deliberately not applied to Windows here.
 	// setPrimaryDisplay() writes through CDS_UPDATEREGISTRY, so it would outlive the
