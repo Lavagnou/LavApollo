@@ -285,28 +285,52 @@
         }
       },
       watchReconnect() {
+        if (this.reconnecting) {
+          return;
+        }
         this.reconnecting = true;
-        // The installer stops the service (sunshine exits), then reinstalls + restarts it.
-        // Wait until the server has gone DOWN, then comes back UP, then reload.
+        // The installer stops the service, reinstalls and restarts it, which can take only a
+        // few seconds. Waiting to *see* the server down, as this used to, missed a restart that
+        // fell between two probes and waited forever with the new version already running.
+        // What tells the new instance apart is its answer: another version, or no longer
+        // knowing this browser's session. Seeing it down then up still counts, for a
+        // reinstall of the same version. Each probe gives up after 3 s (one sent while the
+        // service stops could hang for good), and the page reloads after 3 minutes regardless.
+        const oldVersion = this.config && this.config.version;
+        const deadline = Date.now() + 180000;
         let sawDown = false;
+        const done = () => {
+          this._reconnectPoll = null;
+          window.location.reload();
+        };
         const probe = async () => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3000);
           try {
-            await fetch("./", { method: "GET", cache: "no-store" });
-            if (sawDown) {
-              clearInterval(this._reconnectPoll);
-              this._reconnectPoll = null;
-              window.location.reload();
+            const resp = await fetch("./api/config", { cache: "no-store", signal: controller.signal });
+            if (!resp.ok) {
+              return done(); // up, but a new instance that dropped the session: reload to log in
+            }
+            const config = await resp.json();
+            if (sawDown || (config.version && config.version !== oldVersion)) {
+              return done();
             }
           } catch (e) {
-            sawDown = true; // server went down — installer stopped it
+            sawDown = true; // down (or not answering): the installer stopped it
+          } finally {
+            clearTimeout(timer);
           }
+          if (Date.now() > deadline) {
+            return done();
+          }
+          this._reconnectPoll = setTimeout(probe, 1500);
         };
-        this._reconnectPoll = setInterval(probe, 2000);
+        this._reconnectPoll = setTimeout(probe, 1500);
       },
     },
     beforeUnmount() {
       this.stopStatusPolling();
-      if (this._reconnectPoll) clearInterval(this._reconnectPoll);
+      if (this._reconnectPoll) clearTimeout(this._reconnectPoll);
     },
   });
 

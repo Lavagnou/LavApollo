@@ -588,6 +588,12 @@ test job: run `test_sunshine` locally.
   that launches the installer is the one being replaced.
 - The Web UI's POSTs must send `Content-Type: application/json` (CSRF guard in
   `validateContentType()`); without it the endpoints answer 400.
+- ⚠️ **The page knows the update is done by the new instance's answer, not by seeing the server
+  go down** (`watchReconnect()` in `web/index.html`). It used to wait for a failed probe, then a
+  good one: a restart quick enough to fall between two 2 s probes left "Installing — LavApollo will restart" on screen forever with the new
+  version already running. It now reloads when `/api/config` reports another version, answers
+  without the session (a new instance), or comes back after being seen down; every probe aborts
+  after 3 s, and the page reloads after 3 minutes regardless.
 
 ### Startup
 
