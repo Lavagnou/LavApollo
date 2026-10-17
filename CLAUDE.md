@@ -64,6 +64,12 @@ The value of this fork over upstream Apollo lives in the streaming path (see `gi
     audit fixes made any refusal fall back to a single display (2.1), multi-display broke for them. A refusal is now retried with the positions alone (each display keeps the mode
     and refresh it was created with, `SDC_ALLOW_CHANGES`), then the real geometry is read back:
     same relative positions, sizes within a pixel (a driver may round an odd mode) -> keep it.
+  - ⚠️ **The display at (0,0) is Windows' primary, and an arrangement with nothing at (0,0) is
+    rejected with error 87.** That was the real cause of the refusals above: Windows had restored
+    the bar display 5 px left of the monitor above it, "keep the block where it is" put the block's
+    origin at (-5,0), and the primary virtual display left (0,0). `applyVirtualDisplayLayout()`
+    now shifts **every** display by the primary's offset after placing the block, which brings it
+    back to (0,0) without changing anything relative.
   - `VDISPLAY::applyVirtualDisplayLayout()` places them in **one** `SetDisplayConfig` call —
     moving them one at a time passes through overlapping arrangements, which Windows refuses.
     ⚠️ It sets only their positions **relative to each other**; the block as a whole stays where it

@@ -521,6 +521,17 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 		}
 	}
 
+	// Windows makes the display at (0,0) the primary, and rejects an arrangement with nothing
+	// there (error 87). Remember which one it is, to bring it back once the block has moved.
+	size_t primaryMode = NOT_FOUND;
+	for (UINT32 j = 0; j < modeCount; j++) {
+		if (modeArray[j].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE &&
+		    modeArray[j].sourceMode.position.x == 0 && modeArray[j].sourceMode.position.y == 0) {
+			primaryMode = j;
+			break;
+		}
+	}
+
 	// What each display was created as, for the retry below
 	std::vector<DISPLAYCONFIG_SOURCE_MODE> createdModes;
 	std::vector<DISPLAYCONFIG_RATIONAL> createdRefresh;
@@ -541,6 +552,25 @@ LONG applyVirtualDisplayLayout(const std::vector<LayoutEntry>& layout, int refre
 		sourceMode->height = layout[k].height;
 
 		pathArray[pathIndex[k]].targetInfo.refreshRate = {(UINT32)refresh_rate, 1000};
+	}
+
+	// Keeping the block where it was can move the primary off (0,0): when one of our displays is
+	// the primary and Windows had restored an arrangement slightly off the requested one (a bar
+	// display saved 5 px left of the monitor above it), the block's origin lands at (-5,0), and
+	// Windows refused every layout. Shifting every display by the same amount brings the primary
+	// back to (0,0) and changes nothing relative: no overlap appears, none disappears.
+	if (primaryMode != NOT_FOUND) {
+		const auto shift = modeArray[primaryMode].sourceMode.position;
+		if (shift.x != 0 || shift.y != 0) {
+			for (UINT32 j = 0; j < modeCount; j++) {
+				if (modeArray[j].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) {
+					modeArray[j].sourceMode.position.x -= shift.x;
+					modeArray[j].sourceMode.position.y -= shift.y;
+				}
+			}
+			base_x -= shift.x;
+			base_y -= shift.y;
+		}
 	}
 
 	LONG status = SetDisplayConfig(
