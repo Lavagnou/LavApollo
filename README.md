@@ -1,10 +1,31 @@
 # LavApollo
 
-LavApollo is a personal fork of [Apollo](https://github.com/ClassicOldSong/Apollo) with streaming optimizations (adaptive FEC/bitrate, bitrate-aware send pacing, higher NVENC quality defaults).
+LavApollo is a personal fork of [Apollo](https://github.com/ClassicOldSong/Apollo) (itself a fork of
+[Sunshine](https://github.com/LizardByte/Sunshine)): a self-hosted game-stream host, built as the
+companion of [LavArtemis](https://github.com/Lavagnou/LavArtemis), the Android and desktop client.
+Stock Moonlight and Artemis clients keep working; the LavArtemis-only features below are opt-in
+protocol extensions that other clients simply don't ask for.
 
-LavApollo is a self-hosted desktop stream host for [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android). Offering low latency, native client resolution, cloud gaming server capabilities with support for AMD, Intel, and Nvidia GPUs for hardware encoding. Software encoding is also available. A web UI is provided to allow configuration and client pairing from your favorite web browser. Pair from the local server or any mobile device.
+Low latency, native client resolution, hardware encoding on AMD, Intel and NVIDIA GPUs (software
+encoding too), and a web UI for configuration and pairing.
 
-Major features:
+What LavApollo adds:
+
+- **Adaptive FEC and bitrate**, driven by the client's per-frame FEC reports; bitrate-aware send
+  pacing; higher NVENC quality defaults.
+- **Emulated multi-display**: one virtual display per client monitor, laid out like them
+  (LavArtemis desktop).
+- **VRR pacing**: 1000 Hz virtual displays and frame limiting for clients that present on a VRR screen.
+- **PyroWave** intra-only GPU codec for wired networks ([protocol](docs/pyrowave-protocol.md)).
+- **Microphone passthrough** into a virtual microphone ([docs](docs/mic-passthrough.md)).
+- **Settings benchmark** app used by LavArtemis to score codec/bitrate/pacing combinations
+  ([docs](docs/benchmark.md)).
+- Virtual-display recovery, Remote Monitor, frame limiter (RTSS / NVIDIA) and per-app frame
+  generation, WGC capture from the service, [VHF virtual gamepad](docs/vhf-gamepad.md), persistent
+  web logins, host stats and session history, a v2 web UI at `/v2`, and an in-app updater —
+  several of them ported from [Vibepollo](https://github.com/Nonary/Vibepollo).
+
+Inherited from Apollo:
 
 - [x] Built-in Virtual Display with HDR support that matches the resolution/framerate config of your client automatically
 - [x] Permission management for clients

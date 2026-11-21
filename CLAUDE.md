@@ -493,7 +493,7 @@ contract is `docs/pyrowave-protocol.md`, shared word for word with `LavArtemis-Q
 ## Build
 
 Requires submodules (`git clone --recurse-submodules`, or `git submodule update --init --recursive`),
-CMake > 3.25, GCC 13+ / Clang 17+, and Node.js on `PATH` (the `web-ui` CMake target shells out to `npm install`).
+CMake ≥ 3.20 (`CMakeLists.txt`), GCC 13+ / Clang 17+, and Node.js on `PATH` (the `web-ui` CMake target shells out to `npm install`).
 Platform dependency lists are in `docs/building.md`; Linux deps are scripted in `scripts/linux_build.sh`.
 
 ```bash
@@ -508,7 +508,8 @@ The web UI can be iterated on without a full rebuild: `npm run dev` (vite watch)
 
 ## Tests
 
-Google Test, built as part of the normal build (disable with `-DBUILD_TESTS=OFF`):
+Google Test. ⚠️ **Not built by default**: `BUILD_TESTS` is `OFF` in `cmake/prep/options.cmake`, so
+configure the test tree with `-DBUILD_TESTS=ON` (e.g. a separate `build/t` directory):
 
 ```bash
 ./build/tests/test_sunshine                                  # all
@@ -549,13 +550,24 @@ find ./src ./tests -iname '*.cpp' -o -iname '*.h' -o -iname '*.m' -o -iname '*.m
   creates the session objects consumed by `stream.cpp`.
 - `src/stream.cpp` — the streaming core: video/audio packetization, FEC encoding (`third-party/nanors`),
   send pacing, RTP/control channel via `third-party/moonlight-common-c`, and the loss-stats /
-  adaptive-FEC / adaptive-bitrate controllers.
+  adaptive-FEC / adaptive-bitrate controllers (`stream_adaptive.{h,cpp}`).
+  ⚠️ That submodule is **`ClassicOldSong/moonlight-common-c`** (`.gitmodules`), not the clients'
+  `Lavagnou` fork, so the LavArtemis-only control messages are defined on the host side:
+  `IDX_MICROPHONE_DATA` (index into `packetTypes`, value `0x3080`) in `stream.cpp`, `FRAME_FEC_STATUS_PTYPE` (`0x5502`) in
+  `stream_adaptive.h`. (`0x5502` is also the host→client "Set RGB LED" type in `packetTypes`:
+  opposite directions, harmless, easy to confuse.)
 - `src/video.cpp` + `src/nvenc/` — capture→encode pipeline. `video.cpp` owns encoder selection,
   capture threads (async and synced paths), color space (`video_colorspace.cpp`) and bitstream fixups
   (`cbs.cpp`). `src/nvenc/` is a standalone NVENC implementation used instead of FFmpeg's on Windows.
-- `src/audio.cpp`, `src/input.cpp` (`third-party/inputtino`, ViGEmClient on Windows),
+- `src/audio.cpp`, `src/input.cpp` (`third-party/inputtino`; on Windows ViGEmClient **or** the VHF
+  driver per slot, `platform/windows/vhf_gamepad*.cpp`),
   `src/display_device.cpp` (`third-party/libdisplaydevice` + SudoVDA virtual display on Windows),
-  `src/process.cpp` (app launching, prep commands), `src/upnp.cpp`, `src/system_tray.cpp`.
+  `src/process.cpp` (app launching, prep commands, virtual-display layout/fallback, Benchmark and
+  Remote Monitor apps), `src/upnp.cpp`, `src/system_tray.cpp`.
+- Windows capture: `platform/windows/display_base.cpp` picks the backend (`+`-joined name →
+  `display_composite_vram_t` in `display_vram.cpp`; else WGC or Desktop Duplication),
+  `display_wgc.cpp` + `ipc/` + `tools/sunshine_wgc_capture.cpp` for WGC from the service,
+  `virtual_display.cpp` + `virtual_display_recovery*.cpp` for SudoVDA. Details in the fork sections above.
 
 **Cross-thread communication** is the thing to understand before editing the streaming path.
 `src/globals.h` declares a process-wide "mail" bus (`safe::mail_t`) of named events —
