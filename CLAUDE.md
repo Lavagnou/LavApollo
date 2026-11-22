@@ -612,6 +612,11 @@ Configure while every local build, still on 4.4, passed. A local build is only p
 use the same CMake: check `cmake --version` on both sides. Drop the pin when `BOOST_VERSION` is bumped
 to a release that fixed it.
 
+⚠️ **The runner builds against OpenSSL 4.x** (latest MSYS2), local machines may still be on 3.x: v2.4.1
+failed in `src/crypto.cpp` on 4.1 (opaque `ASN1_STRING`, const `X509_get_subject_name()`). Write
+OpenSSL code that compiles on both -- accessors (`ASN1_STRING_get0_data/length`), build a name and set
+it rather than editing the certificate's own -- since a local build on 3.x proves nothing for 4.x.
+
 ### In-app updater (`src/updater.cpp`, Web UI home page)
 
 - ⚠️ **The staged installer runs elevated and silent**, so it is staged in an `updates` folder next
