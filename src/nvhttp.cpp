@@ -34,6 +34,7 @@
 #include "network.h"
 #include "nvhttp.h"
 #include "platform/common.h"
+#include "current_display.h"
 #include "process.h"
 #include "pyrowave_protocol.h"
 #include "rtsp.h"
@@ -1117,6 +1118,15 @@ namespace nvhttp {
       // Whether this client's microphone would be heard, and if not why: the client sends
       // `clientMicRequested=1` only when it is "ready", and otherwise says what to fix.
       tree.put("root.MicPassthroughState", std::string {mic_passthrough::to_string(mic_passthrough::state(named_cert_p->perm))});
+
+      // The mode of the display a stream captures right now: a LavArtemis client joining this
+      // session, or launching without a virtual display, streams at its aspect and refresh rather
+      // than its own -- otherwise this host pads the image with black bars. Absent when unknown.
+      if (auto display = current_display::captured()) {
+        tree.put("root.CurrentDisplayWidth", display->width);
+        tree.put("root.CurrentDisplayHeight", display->height);
+        tree.put("root.CurrentDisplayRefreshRate", display->refresh);
+      }
 
       // The hidden app LavArtemis benchmarks stream (docs/benchmark.md). Absent when the host
       // does not offer it, so the client knows to say so instead of picking another app.

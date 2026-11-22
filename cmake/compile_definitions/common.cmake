@@ -110,6 +110,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/stream.h"
         "${CMAKE_SOURCE_DIR}/src/framegen_policy.h"
         "${CMAKE_SOURCE_DIR}/src/log_export.h"
+        "${CMAKE_SOURCE_DIR}/src/current_display.cpp"
+        "${CMAKE_SOURCE_DIR}/src/current_display.h"
         "${CMAKE_SOURCE_DIR}/src/stream_adaptive.cpp"
         "${CMAKE_SOURCE_DIR}/src/stream_adaptive.h"
         "${CMAKE_SOURCE_DIR}/src/mic_passthrough.h"

@@ -460,6 +460,18 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
   - The client quits the app between runs whose VRR request differs: the 1000 Hz display only exists
     if VRR was asked for at `/launch`, and `/resume` does not rebuild displays.
 
+- **Captured display mode in `serverinfo`** (`CurrentDisplayWidth`, `CurrentDisplayHeight`,
+  `CurrentDisplayRefreshRate`, paired clients; `src/current_display.{h,cpp}`). A LavArtemis client that
+  joins a running session, or launches without a virtual display, streams at this display's aspect,
+  fitted inside its own settings and never above it, at the lower refresh -- asking for its own size
+  made this host pad the picture with black bars. It also re-reads it mid-session and reconnects when
+  Windows changes the mode (the protocol fixes the stream size at connection time).
+  - What is reported: the running session's display(s) (`proc.get_display_name()`, a `+`-joined
+    layout gives its bounding box at the slowest refresh -- `combine()`, tested), else
+    `output_name`, else the primary display. Absent when it cannot be read.
+  - ⚠️ `serverinfo` runs on the HTTPS thread: only `EnumDisplaySettingsW` reads, nothing that waits on
+    the driver (see the recovery monitor and `MicPassthroughState` above).
+
 ### PyroWave
 
 [PyroWave](https://github.com/Themaister/pyrowave) is an intra-only GPU wavelet codec (Vulkan compute,
