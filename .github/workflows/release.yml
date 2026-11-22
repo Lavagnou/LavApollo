@@ -91,6 +91,17 @@ jobs:
             mingw-w64-ucrt-x86_64-sqlite3
             mingw-w64-ucrt-x86_64-toolchain
 
+      # CMake 4.5 rejects Boost 1.89's libs/locale CMakeLists (source_group TREE
+      # include/boost/locale listing include/boost/locale.hpp, "is not a prefix"),
+      # which failed the v2.4.0 release at Configure. Pin the 4.4 the host is built
+      # and tested with locally until Boost is bumped (BOOST_VERSION in
+      # cmake/dependencies/Boost_Sunshine.cmake): then drop this step.
+      - name: Pin CMake 4.4
+        shell: msys2 {0}
+        run: |
+          pacman -U --noconfirm https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-cmake-4.4.2-2-any.pkg.tar.zst
+          cmake --version
+
       # The VHF virtual gamepad driver ships only signed by LavApollo's certificate
       # (docs/vhf-gamepad.md). Without the secrets the release still builds, without that driver.
       - name: Prepare signed VHF gamepad driver

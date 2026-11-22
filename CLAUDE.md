@@ -605,6 +605,13 @@ through Crowdin (`crowdin.yml`); only edit `public/assets/locale/en.json`.
 release, triggered by pushing a `v*` tag or by manual dispatch with a version input. There is no CI
 test job: run `test_sunshine` locally.
 
+⚠️ **CMake is pinned to 4.4.2 in the release workflow** ("Pin CMake 4.4" step). The runner installs
+the latest MSYS2 CMake, and 4.5 rejects Boost 1.89's own `libs/locale` CMakeLists (`source_group TREE
+include/boost/locale` listing `include/boost/locale.hpp`: "is not a prefix") -- v2.4.0 failed at
+Configure while every local build, still on 4.4, passed. A local build is only proof for CI if both
+use the same CMake: check `cmake --version` on both sides. Drop the pin when `BOOST_VERSION` is bumped
+to a release that fixed it.
+
 ### In-app updater (`src/updater.cpp`, Web UI home page)
 
 - ⚠️ **The staged installer runs elevated and silent**, so it is staged in an `updates` folder next
