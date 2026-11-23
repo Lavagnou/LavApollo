@@ -27,6 +27,7 @@
 // local includes
 #include "config.h"
 #include "platform/common.h"
+#include "playnite.h"
 #include "rtsp.h"
 #include "utility.h"
 
@@ -103,6 +104,11 @@ namespace proc {
     bool terminate_on_pause;
     int  scale_factor;
     std::chrono::seconds exit_timeout;
+
+    /// Playnite game id (upper-case GUID) of a virtual app built from the Playnite library, else empty
+    std::string playnite_game_id;
+    /// The user's Playnite front end: a Playnite game picked while it runs starts inside it
+    bool playnite_host = false;
   };
 
   class proc_t {
@@ -150,6 +156,15 @@ namespace proc {
     std::string get_app_image(int app_id);
     std::string get_last_run_app_name();
     std::string get_running_app_uuid();
+
+    /// Whether the running app is the user's Playnite front end (see ctx_t::playnite_host).
+    bool running_app_is_playnite_host();
+
+    /**
+     * @brief Starts a Playnite game inside the running Playnite front end, keeping the session.
+     * @return false when the running app is not a Playnite host or the game is not a Playnite app.
+     */
+    bool launch_inside_playnite(const ctx_t &game);
     boost::process::v1::environment get_env();
     void resume();
     void pause();
@@ -174,6 +189,11 @@ namespace proc {
 
     // If no command associated with _app_id, yet it's still running
     bool placebo {};
+
+    /// Follows the game of a Playnite app, to end the session when the game closes
+    playnite::watch_t _playnite_watch;
+    /// The watched game closed by itself: terminate() must not ask the extension to close it
+    bool _playnite_game_closed = false;
 
     boost::process::v1::child _process;
     boost::process::v1::group _process_group;

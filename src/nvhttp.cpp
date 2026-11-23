@@ -16,6 +16,7 @@
 #include <vector>
 
 // lib includes
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/ssl/context_base.hpp>
 #include <boost/property_tree/json_parser.hpp>
@@ -35,6 +36,7 @@
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "current_display.h"
+#include "playnite.h"
 #include "process.h"
 #include "pyrowave_protocol.h"
 #include "rtsp.h"
@@ -1211,6 +1213,17 @@ namespace nvhttp {
       tree.put("root.currentgame", current_appid);
       tree.put("root.currentgameuuid", proc::proc.get_running_app_uuid());
       tree.put("root.state", current_appid > 0 ? "SUNSHINE_SERVER_BUSY" : "SUNSHINE_SERVER_FREE");
+
+      // LavApollo Link (Playnite), only when the extension is installed: the game running in
+      // Playnite, and whether the running app is the Playnite front end, where a Playnite game
+      // picked by a client starts without ending the session.
+      if (auto playnite_state = playnite::current_state()) {
+        if (playnite_state->game && !playnite_state->game->starting) {
+          tree.put("root.PlayniteGameName", playnite_state->game->name);
+          tree.put("root.PlayniteGameUuid", playnite_state->game->id);
+        }
+        tree.put("root.PlayniteHostRunning", current_appid > 0 && proc::proc.running_app_is_playnite_host() ? 1 : 0);
+      }
     } else {
       tree.put("root.currentgame", 0);
       tree.put("root.currentgameuuid", "");
@@ -1369,8 +1382,19 @@ namespace nvhttp {
 
     auto named_cert_p = get_verified_cert(request);
     if (!!(named_cert_p->perm & PERM::_all_actions)) {
+      // Playnite library changed (LavApollo Link): rebuild the list, but never under a running
+      // app -- refresh() replaces the whole process state.
+      if (proc::proc.running() == 0 && playnite::library_changed()) {
+        proc::refresh(config::stream.file_apps, false);
+      }
+
       auto current_appid = proc::proc.running();
       auto should_hide_inactive_apps = config::input.enable_input_only_mode && current_appid > 0 && current_appid != proc::input_only_app_id;
+
+      // Playnite games are listed only to clients that ask for them (LavArtemis Dev sends
+      // playnite=1): other clients keep exactly the list they always had.
+      auto applist_args = request->parse_query_string();
+      bool with_playnite_games = get_arg(applist_args, "playnite", "0") == "1";
 
       auto app_list = proc::proc.get_apps();
 
@@ -1402,6 +1426,10 @@ namespace nvhttp {
           continue;
         }
 
+        if (!app.playnite_game_id.empty() && !with_playnite_games) {
+          continue;
+        }
+
         std::string app_name;
         if (enable_legacy_ordering) {
           app_name = zwpad::pad_for_ordering(app.name, bits, i);
@@ -1416,6 +1444,13 @@ namespace nvhttp {
         app_node.put("UUID", app.uuid);
         app_node.put("IDX", app.idx);
         app_node.put("ID", app.id);
+        if (!app.playnite_game_id.empty()) {
+          app_node.put("IsPlayniteGame", 1);
+        }
+        if (app.playnite_host && with_playnite_games) {
+          // The Playnite front end, where Playnite games start without ending the session
+          app_node.put("IsPlayniteHost", 1);
+        }
 
         apps.push_back(std::make_pair("App", std::move(app_node)));
       }
@@ -1435,6 +1470,27 @@ namespace nvhttp {
       return;
     }
 
+  }
+
+  /**
+   * @brief Starts the requested app inside the running Playnite front end, when the request names
+   * a Playnite game and the running app is the user's Playnite (LavApollo Link). The session goes on.
+   * @return true when the game was started that way: the caller then answers as a resume.
+   */
+  bool start_inside_playnite(int appid, const std::string &appuuid) {
+    if (!proc::proc.running_app_is_playnite_host()) {
+      return false;
+    }
+    for (auto &app : proc::proc.get_apps()) {
+      if (app.playnite_game_id.empty()) {
+        continue;
+      }
+      bool wanted = (appid > 0 && util::from_view(app.id) == appid) || (!appuuid.empty() && boost::iequals(app.uuid, appuuid));
+      if (wanted) {
+        return proc::proc.launch_inside_playnite(app);
+      }
+    }
+    return false;
   }
 
   void launch(bool &host_audio, resp_https_t response, req_https_t request) {
@@ -1462,6 +1518,13 @@ namespace nvhttp {
 
     auto named_cert_p = get_verified_cert(request);
     auto perm = PERM::launch;
+
+    // A Playnite game picked while the Playnite front end runs starts inside it: nothing closes,
+    // the stream goes on, and the client gets the reply of a resume of the Playnite app.
+    if (current_appid > 0 && !!(named_cert_p->perm & PERM::launch) && start_inside_playnite(appid, appuuid_str)) {
+      appid = current_appid;
+      appuuid_str = current_app_uuid;
+    }
 
     BOOST_LOG(verbose) << "Launching app [" << appid_str << "] with UUID [" << appuuid_str << "]";
     // BOOST_LOG(verbose) << "QS: " << request->query_string;
@@ -1695,6 +1758,18 @@ namespace nvhttp {
       tree.put("root.<xmlattr>.status_message", "Missing a required resume parameter");
 
       return;
+    }
+
+    // Clients resume whenever an app runs. Picking a Playnite game while the Playnite front end
+    // runs is such a resume, with the game as the app: start it inside Playnite, then resume.
+    if (!!(named_cert_p->perm & PERM::launch)) {
+      auto resume_appid = util::from_view(get_arg(args, "appid", "0"));
+      std::string resume_appuuid {get_arg(args, "appuuid", "")};
+      bool other_app = (resume_appid > 0 && resume_appid != current_appid) ||
+                       (!resume_appuuid.empty() && !boost::iequals(resume_appuuid, proc::proc.get_running_app_uuid()));
+      if (other_app) {
+        start_inside_playnite(resume_appid, resume_appuuid);
+      }
     }
 
     // Newer Moonlight clients send localAudioPlayMode on /resume too,

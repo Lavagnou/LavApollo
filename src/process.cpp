@@ -10,6 +10,7 @@
 // standard includes
 #include <algorithm>
 #include <filesystem>
+#include <set>
 #include <iomanip>
 #include <map>
 #include <mutex>
@@ -839,6 +840,11 @@ namespace proc {
 
     _app_launch_time = std::chrono::steady_clock::now();
 
+    _playnite_game_closed = false;
+    _playnite_watch = _app.playnite_game_id.empty() ?
+                        playnite::watch_t {} :
+                        playnite::watch_t {_app.playnite_game_id, _app_launch_time};
+
   #ifdef _WIN32
     auto resetHDRThread = std::thread([this, enable_hdr = launch_session->enable_hdr]{
       // Windows doesn't seem to be able to set HDR correctly when a display is just connected / changed resolution,
@@ -904,6 +910,28 @@ namespace proc {
     return 0;
   }
 
+  bool proc_t::running_app_is_playnite_host() {
+    return running() > 0 && _app.playnite_host;
+  }
+
+  bool proc_t::launch_inside_playnite(const ctx_t &game) {
+    if (game.playnite_game_id.empty() || !running_app_is_playnite_host()) {
+      return false;
+    }
+
+    std::error_code ec;
+    auto cmd = playnite::launch_command(game.playnite_game_id);
+    auto working_dir = find_working_directory(cmd, _env);
+    BOOST_LOG(info) << "Starting ["sv << game.name << "] inside Playnite: ["sv << cmd << ']';
+    auto child = platf::run_command(false, true, cmd, working_dir, _env, _pipe.get(), ec, nullptr);
+    if (ec) {
+      BOOST_LOG(warning) << "Couldn't start ["sv << game.name << "] inside Playnite: "sv << ec.message();
+      return false;
+    }
+    child.detach();
+    return true;
+  }
+
   int proc_t::running() {
 #ifndef _WIN32
     // On POSIX OSes, we must periodically wait for our children to avoid
@@ -914,6 +942,22 @@ namespace proc {
       while (waitpid(-1, nullptr, WNOHANG) > 0);
     });
 #endif
+
+    // A Playnite game app has no process of its own: its session lasts as long as the game
+    // Playnite reports in state.json.
+    if (_playnite_watch.active() && _app_id > 0) {
+      auto verdict = _playnite_watch.update(playnite::current_state(), std::chrono::steady_clock::now());
+      if (verdict != playnite::watch_t::verdict_e::running) {
+        if (verdict == playnite::watch_t::verdict_e::ended) {
+          BOOST_LOG(info) << "Playnite closed the game of ["sv << _app_name << "], ending the session"sv;
+        } else {
+          BOOST_LOG(warning) << "Playnite never started ["sv << _app_name << "], ending the session"sv;
+        }
+        _playnite_game_closed = verdict == playnite::watch_t::verdict_e::ended;
+        terminate();
+        return 0;
+      }
+    }
 
     if (placebo) {
       return _app_id;
@@ -1050,6 +1094,20 @@ namespace proc {
   void proc_t::terminate(bool immediate, bool needs_refresh) {
     std::error_code ec;
     placebo = false;
+
+    if (_playnite_watch.active()) {
+      // Quit from a client: Playnite keeps the game open unless asked to close it.
+      if (!_playnite_game_closed) {
+        playnite::request_stop(_playnite_watch.game_id());
+      }
+      _playnite_watch = {};
+      _playnite_game_closed = false;
+    } else if (_app.playnite_host && _app_id > 0) {
+      // Quitting the Playnite front end also closes a game started inside it.
+      if (auto state = playnite::current_state(); state && state->game) {
+        playnite::request_stop(state->game->id);
+      }
+    }
 
     if (!immediate) {
       terminate_process_group(_process, _process_group, _app.exit_timeout);
@@ -1497,7 +1555,8 @@ namespace proc {
         "wait-all",
         "use-app-identity",
         "per-client-app-identity",
-        "virtual-display"
+        "virtual-display",
+        "playnite-host"
       };
 
       // List of keys to convert to integers.
@@ -1719,6 +1778,8 @@ namespace proc {
           ctx.terminate_on_pause = app_node.value("terminate-on-pause", false);
           ctx.gamepad = app_node.value("gamepad", "");
           ctx.frame_generation = framegen::normalize_frame_generation_mode(app_node.value("frame-generation", "off"));
+          // The user's Playnite front end: a Playnite game picked while it runs starts inside it.
+          ctx.playnite_host = app_node.value("playnite-host", playnite::is_playnite_command(ctx.cmd));
 
           // Calculate a unique application id.
           auto possible_ids = calculate_app_id(name, ctx.image_path, i++);
@@ -1771,6 +1832,72 @@ namespace proc {
 
       break;
     } while (fail_count < 3);
+
+    // Playnite library (LavApollo Link extension, docs/superpowers/specs/2026-11-23-playnite-
+    // integration-design.md): one virtual app per installed game, after the user's apps. Never
+    // written to apps.json, and an app of the same uuid in apps.json wins. A game app takes the
+    // display settings of the user's Playnite app, if there is one.
+    {
+      std::optional<proc::ctx_t> host;
+      std::set<std::string> uuids;
+      for (auto &app : apps) {
+        uuids.insert(boost::to_upper_copy(app.uuid));
+        if (!host && app.playnite_host) {
+          host = app;
+        }
+      }
+
+      std::vector<proc::ctx_t> game_apps;
+      for (auto &game : playnite::load_library()) {
+        if (!uuids.insert(game.id).second) {
+          continue;
+        }
+
+        proc::ctx_t ctx;
+        ctx.idx = std::to_string(i);
+        ctx.uuid = game.id;
+        ctx.name = game.name;
+        ctx.image_path = game.cover.empty() ? std::string {} : game.cover.string();
+        ctx.playnite_game_id = game.id;
+        ctx.playnite_host = false;
+        // No command: Playnite owns the game's process. LavApollo follows it through state.json
+        // and ends the session when it closes (proc_t::running()).
+        ctx.detached = {playnite::launch_command(game.id)};
+        ctx.elevated = false;
+        ctx.auto_detach = true;
+        ctx.wait_all = false;
+        ctx.exit_timeout = host ? host->exit_timeout : 5s;
+        ctx.virtual_display = host ? host->virtual_display : false;
+        ctx.virtual_display_primary = false;
+        ctx.scale_factor = host ? host->scale_factor : 100;
+        ctx.use_app_identity = host ? host->use_app_identity : false;
+        ctx.per_client_app_identity = host ? host->per_client_app_identity : false;
+        ctx.allow_client_commands = host ? host->allow_client_commands : false;
+        ctx.terminate_on_pause = false;
+        ctx.gamepad = host ? host->gamepad : std::string {};
+        ctx.frame_generation = host ? host->frame_generation : std::string {"off"};
+        if (host) {
+          ctx.working_dir = host->working_dir;
+        }
+
+        auto possible_ids = calculate_app_id(ctx.name, ctx.image_path, i++);
+        if (ids.count(std::get<0>(possible_ids)) == 0) {
+          ctx.id = std::get<0>(possible_ids);
+        } else {
+          ctx.id = std::get<1>(possible_ids);
+        }
+        ids.insert(ctx.id);
+
+        game_apps.emplace_back(std::move(ctx));
+      }
+
+      if (!game_apps.empty()) {
+        BOOST_LOG(info) << "Playnite: "sv << game_apps.size() << " games added to the app list"sv;
+      }
+      for (auto &app : game_apps) {
+        apps.emplace_back(std::move(app));
+      }
+    }
 
     if (fail_count > 0) {
       BOOST_LOG(warning) << "No applications configured, adding fallback Desktop entry.";

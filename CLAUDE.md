@@ -472,6 +472,39 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
   - ⚠️ `serverinfo` runs on the HTTPS thread: only `EnumDisplaySettingsW` reads, nothing that waits on
     the driver (see the recovery monitor and `MicPassthroughState` above).
 
+### Playnite library as apps (LavApollo Link)
+
+Each installed Playnite game becomes a **virtual app**, launched *inside* Playnite. Spec:
+`docs/superpowers/specs/2026-11-23-playnite-integration-design.md`.
+
+- **Playnite extension** `tools/playnite/` (C#, .NET Framework 4.6.2, `dotnet build -c Release`,
+  reference assemblies from NuGet). It writes `%ProgramData%\LavApollo\playnite\library.json`
+  (installed, non-hidden games), `covers\<id>.png` (re-encoded: LavApollo only serves PNG box art),
+  and `state.json` (Playnite running, mode, running game with `starting`). It reads stop requests
+  from `commands\` and kills the game's process tree. Install: copy `bin\Release\` to
+  `%APPDATA%\Playnite\Extensions\LavApolloLink\`.
+- **Host** `src/playnite.{h,cpp}`: parsing (tested in `tests/unit/test_playnite.cpp`), stop
+  requests, and `watch_t`, which ends a game app's session when its game closes (seen then gone,
+  or never seen within 120 s).
+- `proc::parse()` appends one app per game after the user's apps: uuid = Playnite id (upper case),
+  no `cmd`, `detached` = `playnite://playnite/start/<id>`, display settings copied from the user's
+  Playnite app. **Never written to `apps.json`**; an `apps.json` app with the same uuid wins.
+- An app is the **Playnite front end** (`ctx_t::playnite_host`) when `apps.json` says
+  `"playnite-host": true`, or by default when its command starts `Playnite.FullscreenApp.exe` /
+  `Playnite.DesktopApp.exe`. A Playnite game requested by `/launch` **or `/resume`** while it runs
+  starts inside it (`start_inside_playnite()` in `nvhttp.cpp`) and the request is answered as a
+  resume: the stream goes on.
+- `/applist` lists the games **only with `playnite=1`** (sent by LavArtemis Dev), with
+  `IsPlayniteGame=1`, and flags the front end `IsPlayniteHost=1`. `serverinfo` adds
+  `PlayniteGameName`/`PlayniteGameUuid`/`PlayniteHostRunning` when the extension is installed.
+
+> ⚠️ **`proc::refresh()` replaces the whole `proc_t`**, running app included. The library is
+> re-read from `/applist` only when nothing runs (`library_changed()` then `refresh(file, false)`).
+
+> ⚠️ **The extension creates `commands\` itself**: the creator of a ProgramData folder owns it,
+> which is what lets the extension (user) delete the files LavApollo (SYSTEM) writes. LavApollo
+> never creates that folder; without it, a stop request is skipped (logged).
+
 ### PyroWave
 
 [PyroWave](https://github.com/Themaister/pyrowave) is an intra-only GPU wavelet codec (Vulkan compute,
