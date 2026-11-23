@@ -7,7 +7,7 @@
     <AssemblyName>LavApolloLink</AssemblyName>
     <RootNamespace>LavApolloLink</RootNamespace>
     <LangVersion>9.0</LangVersion>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Product>LavApollo Link</Product>
     <Description>Exports the Playnite library and the running game to LavApollo</Description>
     <Copyright>Lavagnou</Copyright>
