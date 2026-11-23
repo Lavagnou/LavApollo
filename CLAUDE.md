@@ -482,7 +482,8 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
   (installed, non-hidden games), `covers\<id>.png` (re-encoded: LavApollo only serves PNG box art),
   and `state.json` (Playnite running, mode, running game with `starting`). It reads stop requests
   from `commands\` and kills the game's process tree. Install: copy `bin\Release\` to
-  `%APPDATA%\Playnite\Extensions\LavApolloLink\`.
+  `%APPDATA%\Playnite\Extensions\LavApolloLink\`, or double-click the `.pext` (a zip of
+  `LavApolloLink.dll`, `extension.yaml`, `icon.png`) attached to the dev prereleases.
 - **Host** `src/playnite.{h,cpp}`: parsing (tested in `tests/unit/test_playnite.cpp`), stop
   requests, and `watch_t`, which ends a game app's session when its game closes (seen then gone,
   or never seen within 120 s).
