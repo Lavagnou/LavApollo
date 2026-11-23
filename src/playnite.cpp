@@ -92,6 +92,7 @@ namespace playnite {
         if (!is_guid(game.id) || game.name.empty()) {
           continue;
         }
+        game.last_activity = string_field(node, "lastActivity");
         auto cover = string_field(node, "cover");
         // A bare file name inside covers\: never let the file point elsewhere.
         if (!cover.empty() && fs::path(cover).filename().string() == cover) {
@@ -142,10 +143,22 @@ namespace playnite {
       return {};
     }
     auto games = parse_library(*text, dir / "covers");
+    sort_recent_first(games);
+    return games;
+  }
+
+  void sort_recent_first(std::vector<game_t> &games) {
+    // The extension writes every date with DateTime.ToString("o") in UTC: same length, same
+    // zone, so the strings sort as the dates do.
     std::sort(games.begin(), games.end(), [](const game_t &a, const game_t &b) {
+      if (a.last_activity != b.last_activity) {
+        if (a.last_activity.empty() || b.last_activity.empty()) {
+          return b.last_activity.empty();
+        }
+        return a.last_activity > b.last_activity;
+      }
       return lower(a.name) < lower(b.name);
     });
-    return games;
   }
 
   bool library_changed() {

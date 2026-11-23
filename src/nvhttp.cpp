@@ -1931,7 +1931,16 @@ namespace nvhttp {
     }
 
     auto args = request->parse_query_string();
-    auto app_image = proc::proc.get_app_image(util::from_view(get_arg(args, "appid")));
+    auto app_id = util::from_view(get_arg(args, "appid"));
+
+    if (proc::proc.is_coverless_playnite_game(app_id)) {
+      fg.disable();
+      response->write(SimpleWeb::StatusCode::client_error_not_found);
+      response->close_connection_after_response = true;
+      return;
+    }
+
+    auto app_image = proc::proc.get_app_image(app_id);
 
     fg.disable();
 

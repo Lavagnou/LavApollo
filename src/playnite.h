@@ -21,6 +21,7 @@ namespace playnite {
     std::string id;  ///< Playnite game id (GUID), upper case: it becomes the app's uuid
     std::string name;
     std::filesystem::path cover;  ///< absolute PNG path, empty when the game has none
+    std::string last_activity;  ///< Playnite's last play time, ISO 8601 UTC ("o"), empty if never played
   };
 
   struct running_game_t {
@@ -44,7 +45,11 @@ namespace playnite {
   /// Parses state.json. Malformed input gives nothing.
   std::optional<state_t> parse_state(const std::string &json);
 
-  /// The installed games, from the exchange folder. Empty when the extension never ran.
+  /// Most recently played first, as Playnite's "Recent activity" sort; never played games last, by name.
+  void sort_recent_first(std::vector<game_t> &games);
+
+  /// The installed games, from the exchange folder, most recently played first (the clients show
+  /// them in this order). Empty when the extension never ran.
   std::vector<game_t> load_library();
 
   /// Whether library.json changed since the last call (checked at most every 5 s).

@@ -47,6 +47,22 @@ TEST(Playnite, parseLibraryKeepsValidGames) {
   EXPECT_TRUE(games[2].cover.empty());
 }
 
+TEST(Playnite, sortRecentFirst) {
+  auto games = playnite::parse_library(R"({"games": [
+    {"id": "11111111-0000-0000-0000-000000000001", "name": "never played b", "lastActivity": ""},
+    {"id": "11111111-0000-0000-0000-000000000002", "name": "Old", "lastActivity": "2024-11-28T14:26:17.0380000Z"},
+    {"id": "11111111-0000-0000-0000-000000000003", "name": "Never played A"},
+    {"id": "11111111-0000-0000-0000-000000000004", "name": "Recent", "lastActivity": "2026-09-23T07:30:06.0000000Z"}
+  ]})", "C:\covers");
+  ASSERT_EQ(games.size(), 4u);
+  EXPECT_EQ(games[1].last_activity, "2024-11-28T14:26:17.0380000Z");
+  playnite::sort_recent_first(games);
+  EXPECT_EQ(games[0].name, "Recent");
+  EXPECT_EQ(games[1].name, "Old");
+  EXPECT_EQ(games[2].name, "Never played A");
+  EXPECT_EQ(games[3].name, "never played b");
+}
+
 TEST(Playnite, parseLibraryMalformed) {
   EXPECT_TRUE(playnite::parse_library("{not json", "C:\\covers").empty());
   EXPECT_TRUE(playnite::parse_library("{\"games\": 3}", "C:\\covers").empty());

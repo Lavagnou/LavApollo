@@ -1250,6 +1250,13 @@ namespace proc {
     return validate_app_image_path(app_image_path);
   }
 
+  bool proc_t::is_coverless_playnite_game(int app_id) {
+    auto iter = std::find_if(_apps.begin(), _apps.end(), [&app_id](const auto &app) {
+      return app.id == std::to_string(app_id);
+    });
+    return iter != _apps.end() && !iter->playnite_game_id.empty() && iter->image_path.empty();
+  }
+
   std::string proc_t::get_last_run_app_name() {
     return _app_name;
   }

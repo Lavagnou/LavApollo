@@ -514,7 +514,10 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
   starts inside it (`start_inside_playnite()` in `nvhttp.cpp`) and the request is answered as a
   resume: the stream goes on.
 - `/applist` lists the games **only with `playnite=1`** (sent by LavArtemis Dev), with
-  `IsPlayniteGame=1`, and flags the front end `IsPlayniteHost=1`. `serverinfo` adds
+  `IsPlayniteGame=1`, and flags the front end `IsPlayniteHost=1`. Games come **most recently played
+  first** (`playnite::sort_recent_first()`, `lastActivity` of library.json, never played last by
+  name): the clients keep that order. `/appasset` answers **404 for a game without a cover**
+  (`is_coverless_playnite_game()`) instead of the generic `box.png`, so the clients show its name. `serverinfo` adds
   `PlayniteGameName`/`PlayniteGameUuid`/`PlayniteHostRunning` when the extension is installed.
 - `/playnite-quit-game` ("Quitter le jeu" in the clients' in-game menu): asks the extension to close
   the game running in Playnite and keeps the stream, which goes back to Playnite. 404 when no game

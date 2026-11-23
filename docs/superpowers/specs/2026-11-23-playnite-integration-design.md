@@ -96,4 +96,5 @@ bureau comme en Fullscreen, et démarre Playnite s'il est fermé) : pas besoin d
 ## Laissé au constructeur
 
 - Délais exacts (5 s, 120 s), nommage des logs, forme du menu Playnite.
-- Ordre des jeux dans la liste (après les applis de l'utilisateur, ordre alphabétique proposé).
+- Ordre des jeux dans la liste : après les applis de l'utilisateur, **le plus récemment joué d'abord**
+  (tri « Activité récente » de Playnite, demandé par l'utilisateur), jamais joués à la fin par nom.

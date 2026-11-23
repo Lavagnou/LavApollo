@@ -154,6 +154,9 @@ namespace proc {
     const std::vector<ctx_t> &get_apps() const;
     std::vector<ctx_t> &get_apps();
     std::string get_app_image(int app_id);
+    /// A Playnite game without a cover: /appasset answers 404 instead of the generic box.png, so
+    /// the LavArtemis Dev clients (the only ones that list these games) show the game's name.
+    bool is_coverless_playnite_game(int app_id);
     std::string get_last_run_app_name();
     std::string get_running_app_uuid();
 
