@@ -7,10 +7,9 @@ name: Release
 #  - Run the workflow manually from the Actions tab and provide a version;
 #    the tag is then created on the selected ref by the release step.
 
+# Manual only (2026-11-23): releases are built locally and uploaded with `gh release`, to spare
+# the Actions quota. Pushing a v* tag no longer starts this workflow.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       version:
