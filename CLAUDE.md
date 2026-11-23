@@ -497,6 +497,9 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
 - `/applist` lists the games **only with `playnite=1`** (sent by LavArtemis Dev), with
   `IsPlayniteGame=1`, and flags the front end `IsPlayniteHost=1`. `serverinfo` adds
   `PlayniteGameName`/`PlayniteGameUuid`/`PlayniteHostRunning` when the extension is installed.
+- `/playnite-quit-game` ("Quitter le jeu" in the clients' in-game menu): asks the extension to close
+  the game running in Playnite and keeps the stream, which goes back to Playnite. 404 when no game
+  runs. Unlike `/cancel`, it terminates neither the stream nor the app.
 
 > ⚠️ **`proc::refresh()` replaces the whole `proc_t`**, running app included. The library is
 > re-read from `/applist` only when nothing runs (`library_changed()` then `refresh(file, false)`).

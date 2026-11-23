@@ -1875,6 +1875,42 @@ namespace nvhttp {
     display_device::revert_configuration();
   }
 
+  /**
+   * @brief "Quitter le jeu" while streaming Playnite: closes the game running inside Playnite and
+   * keeps the session, so the stream goes back to Playnite (LavApollo Link). Unlike /cancel, no
+   * stream session and no app is terminated.
+   */
+  void playnite_quit_game(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+
+    pt::ptree tree;
+    auto g = util::fail_guard([&]() {
+      std::ostringstream data;
+
+      pt::write_xml(data, tree);
+      response->write(data.str());
+      response->close_connection_after_response = true;
+    });
+
+    auto named_cert_p = get_verified_cert(request);
+    if (!(named_cert_p->perm & PERM::launch)) {
+      tree.put("root.<xmlattr>.status_code", 403);
+      tree.put("root.<xmlattr>.status_message", "Permission denied");
+      return;
+    }
+
+    auto state = playnite::current_state();
+    if (!state || !state->game) {
+      tree.put("root.<xmlattr>.status_code", 404);
+      tree.put("root.<xmlattr>.status_message", "No game is running in Playnite");
+      return;
+    }
+
+    playnite::request_stop(state->game->id);
+    tree.put("root.stopping", 1);
+    tree.put("root.<xmlattr>.status_code", 200);
+  }
+
   void appasset(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -2109,6 +2145,7 @@ namespace nvhttp {
       resume(host_audio, resp, req);
     };
     https_server.resource["^/cancel$"]["GET"] = cancel;
+    https_server.resource["^/playnite-quit-game$"]["GET"] = playnite_quit_game;
     https_server.resource["^/actions/clipboard$"]["GET"] = getClipboard;
     https_server.resource["^/pyrowave-bandwidth-probe$"]["GET"] = getPyroWaveBandwidthProbe;
     https_server.resource["^/actions/clipboard$"]["POST"] = setClipboard;
