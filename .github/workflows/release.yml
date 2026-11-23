@@ -166,6 +166,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          # A manual run creates its tag: put it on the commit that was built (the dev branch for
+          # a prerelease), not on the default branch, which the API would pick otherwise.
+          target_commitish: ${{ github.sha }}
           name: LavApollo ${{ steps.version.outputs.tag }}
           generate_release_notes: true
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
