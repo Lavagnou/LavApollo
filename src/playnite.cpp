@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "logging.h"
+#include "platform/common.h"
 #include "test_host.h"
 
 using namespace std::literals;
@@ -220,7 +221,24 @@ namespace playnite {
 
   namespace {
     // Test host mode: the fake PC's own Playnite state (the exchange folder is redirected with %ProgramData%).
-    void write_test_state(const nlohmann::json &game) {
+    // Only the fake PC's own exchange folder (ProgramData redirected under the test appdata) may be written.
+    bool test_exchange_is_sandboxed() {
+      std::error_code ec;
+      auto dir = fs::weakly_canonical(exchange_dir(), ec);
+      auto root = fs::weakly_canonical(platf::appdata(), ec);
+      if (ec) {
+        return false;
+      }
+      auto rel = dir.lexically_relative(root);
+      return !rel.empty() && *rel.begin() != "..";
+    }
+
+    bool write_test_state(const nlohmann::json &game) {
+      if (!test_exchange_is_sandboxed()) {
+        BOOST_LOG(warning) << "Playnite: test host refuses to write outside its appdata: "sv << exchange_dir().string();
+        test_host::log("events", {{"playnite_refused", exchange_dir().string()}});
+        return false;
+      }
       nlohmann::json state;
       state["playniteRunning"] = true;
       state["mode"] = "fullscreen";
@@ -239,6 +257,7 @@ namespace playnite {
       if (ec) {
         BOOST_LOG(warning) << "Playnite: test host cannot write state.json: "sv << ec.message();
       }
+      return true;
     }
   }  // namespace
 
@@ -265,8 +284,9 @@ namespace playnite {
         break;
       }
     }
-    test_host::log("events", {{"playnite_launch", lower(id)}});
-    write_test_state({{"id", lower(id)}, {"name", name}, {"starting", false}});
+    if (write_test_state({{"id", lower(id)}, {"name", name}, {"starting", false}})) {
+      test_host::log("events", {{"playnite_launch", lower(id)}});
+    }
     return true;
   }
 
@@ -274,8 +294,9 @@ namespace playnite {
     static std::atomic<unsigned> counter {0};
 
     if (test_host::enabled()) {
-      test_host::log("events", {{"playnite_stop", lower(game_id)}});
-      write_test_state(nullptr);
+      if (write_test_state(nullptr)) {
+        test_host::log("events", {{"playnite_stop", lower(game_id)}});
+      }
       return;
     }
 

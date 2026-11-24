@@ -234,3 +234,29 @@ TEST_F(TestHost, RunCommandIsLoggedNotRun) {
   EXPECT_EQ(lines[0]["interactive"], true);
   EXPECT_EQ(lines[0]["working_dir"], tmp.string());
 }
+
+TEST_F(TestHost, AppCommandWithAGroupStaysUpUntilTheGroupIsTerminated) {
+  parse("test_host = enabled\n");
+  boost::filesystem::path working_dir = tmp.string();
+  std::error_code ec;
+  auto env = boost::this_process::environment();
+  boost::process::v1::group group;
+
+  auto child = platf::run_command(false, true, "cmd /c exit 3", working_dir, env, nullptr, ec, &group);
+  ASSERT_FALSE(ec);
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  EXPECT_TRUE(child.running());
+
+  group.terminate(ec);
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  EXPECT_FALSE(child.running());
+}
+
+TEST_F(TestHost, ClipboardIsKeptInMemoryAndLogged) {
+  parse("test_host = enabled\n");
+  EXPECT_TRUE(platf::set_clipboard("hello"));
+  EXPECT_EQ(platf::get_clipboard(), "hello");
+  auto lines = read_lines(test_host::dir() / "events.jsonl");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0]["clipboard_set"], "hello");
+}

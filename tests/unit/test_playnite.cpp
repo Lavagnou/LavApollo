@@ -145,8 +145,10 @@ namespace {
       }
       tmp = std::filesystem::temp_directory_path() / ("lav_playnite_th_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
       std::filesystem::remove_all(tmp);
-      _putenv_s("ProgramData", tmp.string().c_str());
+      _putenv_s("ProgramData", (tmp / "appdata" / "pd").string().c_str());
       std::filesystem::create_directories(playnite::exchange_dir() / "commands");
+      old_appdata = std::getenv("LAVAPOLLO_APPDATA") ? std::getenv("LAVAPOLLO_APPDATA") : "";
+      _putenv_s("LAVAPOLLO_APPDATA", (tmp / "appdata").string().c_str());
       saved = config::sunshine.test_host;
       config::sunshine.test_host = true;
       std::ofstream {playnite::exchange_dir() / "library.json"} << kLibrary;
@@ -154,6 +156,7 @@ namespace {
 
     void TearDown() override {
       config::sunshine.test_host = saved;
+      _putenv_s("LAVAPOLLO_APPDATA", old_appdata.c_str());
       _putenv_s("ProgramData", had_env ? old_env.c_str() : "");
       std::error_code ec;
       std::filesystem::remove_all(tmp, ec);
@@ -168,6 +171,7 @@ namespace {
     bool had_env = false;
     bool saved = false;
     std::string old_env;
+    std::string old_appdata;
   };
 }  // namespace
 
@@ -190,4 +194,14 @@ TEST_F(PlayniteTestHost, TestHostLaunchWritesRunningState) {
   ASSERT_TRUE(state);
   EXPECT_TRUE(state->playnite_running);
   EXPECT_FALSE(state->game);
+}
+
+TEST_F(PlayniteTestHost, RefusesToWriteOutsideTheTestAppdata) {
+  _putenv_s("ProgramData", (tmp / "elsewhere").string().c_str());
+  std::filesystem::create_directories(playnite::exchange_dir());
+  std::ofstream {playnite::exchange_dir() / "library.json"} << kLibrary;
+
+  playnite::test_host_launch(playnite::launch_command("fb5d018a-058e-4ffe-ae4b-3fd3d48a5b28"));
+  playnite::request_stop("fb5d018a-058e-4ffe-ae4b-3fd3d48a5b28");
+  EXPECT_FALSE(std::filesystem::exists(playnite::exchange_dir() / "state.json"));
 }

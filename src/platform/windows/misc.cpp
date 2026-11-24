@@ -55,6 +55,7 @@
 #include "src/platform/common.h"
 #include "src/playnite.h"
 #include "src/test_host.h"
+#include <mutex>
 #include "src/utility.h"
 
 // UDP_SEND_MSG_SIZE was added in the Windows 10 20H1 SDK
@@ -1051,7 +1052,9 @@ namespace platf {
       // at once stands in, and process.cpp's auto-detach keeps the app "running" until it is quit.
       test_host::log("commands", {{"cmd", cmd_in}, {"elevated", elevated}, {"interactive", interactive}, {"working_dir", working_dir.string()}});
       playnite::test_host_launch(cmd_in);
-      cmd = "cmd.exe /d /c exit 0";
+      // The app's main command (run in a process group) must stay up until the group is terminated, whatever
+      // auto-detach says; commands that are waited on get the instant no-op.
+      cmd = group ? "cmd.exe /d /c ping -n 2147483647 127.0.0.1 >nul" : "cmd.exe /d /c exit 0";
       elevated = false;
       interactive = false;
     }
@@ -2012,15 +2015,14 @@ namespace platf {
   }
 
   // Test host mode: the fake PC's clipboard lives in memory, the real one is never touched.
-  static std::string &test_host_clipboard() {
-    static std::string text;
-    return text;
-  }
+  static std::mutex test_host_clipboard_lock;
+  static std::string test_host_clipboard_text;
 
   std::string
   get_clipboard() {
     if (test_host::enabled()) {
-      return test_host_clipboard();
+      std::lock_guard lg {test_host_clipboard_lock};
+      return test_host_clipboard_text;
     }
     std::string currentClipboard = to_utf8(getClipboardData());
     return currentClipboard;
@@ -2029,7 +2031,10 @@ namespace platf {
   bool
   set_clipboard(const std::string& content) {
     if (test_host::enabled()) {
-      test_host_clipboard() = content;
+      {
+        std::lock_guard lg {test_host_clipboard_lock};
+        test_host_clipboard_text = content;
+      }
       test_host::log("events", {{"clipboard_set", content}});
       return true;
     }
