@@ -301,4 +301,10 @@ namespace nvhttp {
    * @return False only for the Benchmark app while it is not running.
    */
   bool benchmark_app_listed(int appid, int current_appid, int benchmark_appid);
+
+  /**
+   * @brief The ServerCodecModeSupport bits /serverinfo advertises (SCM_* of Limelight.h).
+   * @return The codecs the last encoder probe found; H.264 alone in test host mode.
+   */
+  uint32_t server_codec_mode_support();
 }  // namespace nvhttp

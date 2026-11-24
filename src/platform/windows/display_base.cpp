@@ -28,6 +28,7 @@ typedef enum _D3DKMT_GPU_PREFERENCE_QUERY_STATE: DWORD {
 } D3DKMT_GPU_PREFERENCE_QUERY_STATE;
 
 #include "display.h"
+#include "display_synthetic.h"
 #include "misc.h"
 #include "src/config.h"
 #include "src/display_device.h"
@@ -1002,6 +1003,12 @@ namespace platf {
    * @param hwdevice_type enables possible use of hardware encoder
    */
   std::shared_ptr<display_t> display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config) {
+    // Test host mode (or capture = synthetic): a generated picture, whatever the display name.
+    // Never a real display, not even when the synthetic one cannot be made.
+    if (synthetic_capture_selected()) {
+      return synthetic_display(hwdevice_type, config);
+    }
+
     // A composite request names several displays at once, to be captured as one picture.
     // It is hardware-encoder only: assembling the desktop on the GPU just to read it back
     // for a software encoder would cost more than the feature is worth, and the callers
@@ -1074,6 +1081,10 @@ namespace platf {
   }
 
   std::vector<std::string> display_names(mem_type_e) {
+    if (synthetic_capture_selected()) {
+      return {"synthetic"};
+    }
+
     std::vector<std::string> display_names;
 
     HRESULT status;

@@ -27,6 +27,8 @@
 #include <cstring>
 #include <string>
 
+#include "../src/benchmark_scene_formula.h"
+
 namespace {
   const char *const kShader = R"hlsl(
 cbuffer Frame : register(b0) {
@@ -124,9 +126,11 @@ float4 ps_main(VSOut input) : SV_Target {
   float grain = hash12(px + float2(frame % 997, (frame * 7) % 991)) - 0.5;
   col += grain * lerp(0.015, 0.09, busy);
 
-  // Frame number as 16 bits in the bottom-left corner, for tools that want to spot repeats
-  if (px.y > resolution.y - 12.0 && px.x < 16.0 * 12.0) {
-    uint bit = (uint)(px.x / 12.0);
+  // Frame number in the bottom-left corner, for tools that want to spot repeats or losses: one row
+  // of FRAME_BITS black (0) / white (1) cells of FRAME_CELL_PX pixels, bit 0 leftmost. The layout is
+  // the one src/benchmark_scene_formula.h documents; both macros come from its constants.
+  if (px.y >= resolution.y - FRAME_CELL_PX && px.x < FRAME_BITS * FRAME_CELL_PX) {
+    uint bit = (uint)(px.x / FRAME_CELL_PX);
     col = ((frame >> bit) & 1u) ? float3(1, 1, 1) : float3(0, 0, 0);
   }
 
@@ -237,7 +241,15 @@ float4 ps_main(VSOut input) : SV_Target {
   ID3DBlob *compile(const char *entry, const char *target) {
     ID3DBlob *code = nullptr;
     ID3DBlob *errors = nullptr;
-    HRESULT status = D3DCompile(kShader, std::strlen(kShader), "benchmark_scene", nullptr, nullptr, entry, target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
+    // The frame number layout, shared with the test host's synthetic capture and its readers
+    static const std::string cell_px = std::to_string(benchmark_scene::frame_cell_px) + ".0";
+    static const std::string bits = std::to_string(benchmark_scene::frame_bits) + ".0";
+    const D3D_SHADER_MACRO defines[] = {
+      {"FRAME_CELL_PX", cell_px.c_str()},
+      {"FRAME_BITS", bits.c_str()},
+      {nullptr, nullptr},
+    };
+    HRESULT status = D3DCompile(kShader, std::strlen(kShader), "benchmark_scene", defines, nullptr, entry, target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
     if (FAILED(status)) {
       if (errors) {
         OutputDebugStringA(static_cast<const char *>(errors->GetBufferPointer()));

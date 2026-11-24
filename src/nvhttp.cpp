@@ -42,6 +42,7 @@
 #include "rtsp.h"
 #include "stream.h"
 #include "system_tray.h"
+#include "test_host.h"
 #include "utility.h"
 #include "uuid.h"
 #include "video.h"
@@ -1052,6 +1053,48 @@ namespace nvhttp {
     return true;
   }
 
+  uint32_t server_codec_mode_support() {
+    // Test host mode: H.264 only, whatever the probe found. The synthetic capture already refuses
+    // the rest (display_synthetic_t::is_codec_supported()), so the probe should find nothing else;
+    // this makes sure no probe or config state ever advertises a codec the testbench does not expect.
+    if (test_host::enabled()) {
+      return SCM_H264;
+    }
+
+    uint32_t codec_mode_flags = SCM_H264;
+    if (video::last_encoder_probe_supported_yuv444_for_codec[0]) {
+      codec_mode_flags |= SCM_H264_HIGH8_444;
+    }
+    if (video::active_hevc_mode >= 2) {
+      codec_mode_flags |= SCM_HEVC;
+      if (video::last_encoder_probe_supported_yuv444_for_codec[1]) {
+        codec_mode_flags |= SCM_HEVC_REXT8_444;
+      }
+    }
+    if (video::active_hevc_mode >= 3) {
+      codec_mode_flags |= SCM_HEVC_MAIN10;
+      if (video::last_encoder_probe_supported_yuv444_for_codec[1]) {
+        codec_mode_flags |= SCM_HEVC_REXT10_444;
+      }
+    }
+    if (video::active_av1_mode >= 2) {
+      codec_mode_flags |= SCM_AV1_MAIN8;
+      if (video::last_encoder_probe_supported_yuv444_for_codec[2]) {
+        codec_mode_flags |= SCM_AV1_HIGH8_444;
+      }
+    }
+    if (video::active_av1_mode >= 3) {
+      codec_mode_flags |= SCM_AV1_MAIN10;
+      if (video::last_encoder_probe_supported_yuv444_for_codec[2]) {
+        codec_mode_flags |= SCM_AV1_HIGH10_444;
+      }
+    }
+    if (video::active_pyrowave_mode >= 2) {
+      codec_mode_flags |= pyrowave::protocol::SCM_MASK_PYROWAVE;
+    }
+    return codec_mode_flags;
+  }
+
   template<class T>
   void serverinfo(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
     print_req<T>(request);
@@ -1157,38 +1200,7 @@ namespace nvhttp {
       tree.put("root.LocalIP", net::addr_to_normalized_string(local_endpoint.address()));
     }
 
-    uint32_t codec_mode_flags = SCM_H264;
-    if (video::last_encoder_probe_supported_yuv444_for_codec[0]) {
-      codec_mode_flags |= SCM_H264_HIGH8_444;
-    }
-    if (video::active_hevc_mode >= 2) {
-      codec_mode_flags |= SCM_HEVC;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[1]) {
-        codec_mode_flags |= SCM_HEVC_REXT8_444;
-      }
-    }
-    if (video::active_hevc_mode >= 3) {
-      codec_mode_flags |= SCM_HEVC_MAIN10;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[1]) {
-        codec_mode_flags |= SCM_HEVC_REXT10_444;
-      }
-    }
-    if (video::active_av1_mode >= 2) {
-      codec_mode_flags |= SCM_AV1_MAIN8;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[2]) {
-        codec_mode_flags |= SCM_AV1_HIGH8_444;
-      }
-    }
-    if (video::active_av1_mode >= 3) {
-      codec_mode_flags |= SCM_AV1_MAIN10;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[2]) {
-        codec_mode_flags |= SCM_AV1_HIGH10_444;
-      }
-    }
-    if (video::active_pyrowave_mode >= 2) {
-      codec_mode_flags |= pyrowave::protocol::SCM_MASK_PYROWAVE;
-    }
-    tree.put("root.ServerCodecModeSupport", codec_mode_flags);
+    tree.put("root.ServerCodecModeSupport", server_codec_mode_support());
 
     tree.put("root.PairStatus", pair_status);
 

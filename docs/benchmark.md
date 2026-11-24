@@ -31,7 +31,8 @@ time (after a driver update, on another network...).
   5 s of heavy motion so that bitrate makes a difference. It paces itself at `SUNSHINE_CLIENT_FPS` with a
   high-resolution timer, skipping (never delaying) a frame that misses its slot, and covers the display
   capture reads, which the host names in `LAVAPOLLO_CAPTURE_DISPLAY`. The bottom-left corner
-  carries the frame number as 16 black/white cells of 12 px.
+  carries the frame number as 32 black/white cells of 8 px, the layout `src/benchmark_scene_formula.h`
+  documents (shared with the test host's synthetic capture).
 
 **Between runs**, a client resumes the running Benchmark app with the next settings (`/resume` renegotiates
 codec and bitrate). Requesting VRR or not changes the host's virtual display, which is only created at
