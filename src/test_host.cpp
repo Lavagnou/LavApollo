@@ -37,7 +37,7 @@ namespace test_host {
     return true;
   }
 
-  void log(std::string_view stream, const nlohmann::json &event) {
+  static void log_unchecked(std::string_view stream, const nlohmann::json &event) {
     nlohmann::json line = event.is_object() ? event : nlohmann::json {{"value", event}};
     if (!line.contains("t")) {
       line["t"] = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
@@ -67,6 +67,17 @@ namespace test_host {
       return;
     }
     reported.erase(file);  // a later failure is worth a new warning
-    out << line.dump() << '\n';
+    // Client-controlled text can be invalid UTF-8: replace it (the event stays recorded) instead of throwing.
+    out << line.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << '\n';
+  }
+
+  void log(std::string_view stream, const nlohmann::json &event) {
+    try {
+      log_unchecked(stream, event);
+    } catch (const std::exception &e) {
+      BOOST_LOG(warning) << "Test host: dropped a log event: "sv << e.what();
+    } catch (...) {
+      BOOST_LOG(warning) << "Test host: dropped a log event"sv;
+    }
   }
 }  // namespace test_host

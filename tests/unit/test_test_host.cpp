@@ -378,3 +378,17 @@ TEST_F(TestHost, GamepadIsLoggedWithoutAVirtualController) {
   EXPECT_EQ(lines[4]["percentage"], 80);
   EXPECT_EQ(lines[5]["type"], "gamepad_free");
 }
+
+TEST_F(TestHost, InvalidUtf8InTheLogDoesNotThrowAndIsStillRecorded) {
+  parse("test_host = enabled\n");
+  auto input = platf::input();
+  char bad[] = "a\xFF" "b";
+  EXPECT_NO_THROW(platf::unicode(input, bad, 3));
+  EXPECT_NO_THROW(test_host::log("events", {{"raw", std::string("x\xC3")}}));
+
+  auto in = read_lines(test_host::dir() / "input.jsonl");
+  ASSERT_EQ(in.size(), 1u);
+  EXPECT_EQ(in[0]["type"], "unicode");
+  EXPECT_NE(in[0]["text"].get<std::string>().find('a'), std::string::npos);
+  EXPECT_EQ(read_lines(test_host::dir() / "events.jsonl").size(), 1u);
+}
