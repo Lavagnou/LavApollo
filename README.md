@@ -20,6 +20,9 @@ What LavApollo adds:
 - **Microphone passthrough** into a virtual microphone ([docs](docs/mic-passthrough.md)).
 - **Settings benchmark** app used by LavArtemis to score codec/bitrate/pacing combinations
   ([docs](docs/benchmark.md)).
+- **Playnite library as apps**: with the LavApollo Link extension for Playnite, every installed game
+  becomes an app launched inside Playnite, most recently played first, and a game picked while Playnite
+  Fullscreen runs starts there without ending the stream. Listed only to LavArtemis Dev clients.
 - Virtual-display recovery, Remote Monitor, frame limiter (RTSS / NVIDIA) and per-app frame
   generation, WGC capture from the service, [VHF virtual gamepad](docs/vhf-gamepad.md), persistent
   web logins, host stats and session history, a v2 web UI at `/v2`, and an in-app updater —
@@ -158,74 +161,22 @@ Here're some common causes and solutions for stutters: [WiKi](https://github.com
 
 SudoVDA: Virtual Display Adapter Driver used in Apollo
 
-[Artemis](https://github.com/ClassicOldSong/moonlight-android): Integrated Virtual Display options control from client side
-
-**NOTE**: Artemis currently supports Android only. Other platforms will come later.
-
-## Support
-
-Currently support is only provided via GitHub Issues/Discussions.
-
-No real time chat support will ever be provided for Apollo and Artemis. Including but not limited to:
-
-- Discord
-- Telegram
-- Whatsapp
-- QQ
-- WeChat 
-
-> When there's a chat, there're dramas. -- Confucius
+[LavArtemis](https://github.com/Lavagnou/LavArtemis): the companion client, for Android and desktop,
+with the virtual display options, the protocol extensions above and the Playnite library (Dev channel).
 
 ## Downloads
 
-### Direct Download
+[Releases](https://github.com/Lavagnou/LavApollo/releases): Windows installer, portable zip and their
+SHA-256 sums. An installed LavApollo updates itself from the web UI home page (stable releases only).
 
-**Recommended**
+The Playnite work ships first as **prereleases numbered 2.4.9x**, installed by hand, with the
+LavApollo Link extension (`.pext`, double-click to install it in Playnite) attached.
 
-[Releases](https://github.com/ClassicOldSong/Apollo/releases)
+## Credits
 
-### WinGet
-
-**Note:** Community maintained
-
-In an elevated PowerShell window, run
-
-```pwsh
-winget install ClassicOldSong.Apollo
-
-```
-
-You'll need WinGet installed first.
-
-### Chocolatey
-
-**Note:** Community maintained
-
-You can also install the apollo streaming server with chocolatey.
-
-Install Chocolatey if you don't have it, then run the following command in an elevated PowerShell/CMD window:
-
-```pwsh
-choco upgrade apollo -y 
-```
-
-Same command can be used to upgrade, add to a scheduled task to automate updates.
-
-See more details on the chocolatey package [here](https://community.chocolatey.org/packages/apollo)
-
-## Disclaimer
-
-I got kicked from Moonlight and Sunshine's Discord server and banned from Sunshine's GitHub repo literally for helping people out.
-
-This is what I got for finding a bug, opened an issue, getting no response, troubleshoot myself, fixed the issue myself, shared it by PR to the main repo hoping my efforts can help someone else during the maintenance gap.
-
-Yes, I'm going away. [Apollo](https://github.com/ClassicOldSong/Apollo) and [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android) will no longer be compatible with OG Sunshine and OG Moonlight eventually, but they'll work even better with much more carefully designed features.
-
-The Moonlight repo had stayed silent for 5 months, with nobody actually responding to issues, and people are getting totally no help besides the limited FAQ in their Discord server. I tried to answer issues and questions, solve problems within my ability but I got kicked out just for helping others.
-
-**PRs for feature improvements are welcomed here unlike the main repo, your ideas are more likely to be appreciated and your efforts are actually being respected. We welcome people who can and willing to share their efforts, helping yourselves and other people in need.**
-
-**Update**: They have contacted me and apologized for this incident, but the fact it **happened** still motivated me to start my own fork.
+LavApollo builds on [Apollo](https://github.com/ClassicOldSong/Apollo) by ClassicOldSong and
+[Sunshine](https://github.com/LizardByte/Sunshine) by LizardByte, and ports several features from
+[Vibepollo](https://github.com/Nonary/Vibepollo) by Nonary.
 
 ## License
 

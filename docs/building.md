@@ -129,8 +129,8 @@ visible to CMake.
 Ensure [git](https://git-scm.com) is installed on your system, then clone the repository using the following command:
 
 ```bash
-git clone https://github.com/ClassicOldSong/Apollo.git --recurse-submodules
-cd Apollo
+git clone https://github.com/Lavagnou/LavApollo.git --recurse-submodules
+cd LavApollo
 mkdir build
 ```
 
@@ -172,12 +172,10 @@ ninja -C build
 }
 
 ### Remote Build
-It may be beneficial to build remotely in some cases. This will enable easier building on different operating systems.
-
-1. Fork the project
-2. Activate workflows
-3. Trigger the *CI* workflow manually
-4. Download the artifacts/binaries from the workflow run summary
+LavApollo has no CI build workflow. The *Release* workflow (`.github/workflows/release.yml`) builds the
+Windows installer and portable zip on GitHub Actions; it only runs when started by hand (version and
+pre-release inputs) and publishes a GitHub release. Releases are normally built locally with the steps
+above.
 
 <div class="section_buttons">
 

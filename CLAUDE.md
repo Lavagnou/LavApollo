@@ -308,7 +308,7 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
     both drivers can own slots in the same session.
   - x360/ds4 are now reported disabled when ViGEmBus is not installed (`vigem_t::available()`).
     Before, `vigem_t::init()` always succeeded, so they always showed as available.
-  - ⚠️ **The archive is unsigned. CI signs it with LavApollo's self-signed certificate**
+  - ⚠️ **The archive is unsigned. The release workflow signs it with LavApollo's self-signed certificate**
     (`scripts/prepare-vhf-gamepad.ps1`; secrets `VHF_SIGNING_CERT_BASE64` / `VHF_SIGNING_CERT_PASSWORD`,
     created by the user with `scripts/generate-vhf-signing-cert.ps1`). The catalogue and the setup
     tool are signed; the driver DLL **must not be**, because the catalogue hashes it.
@@ -368,7 +368,7 @@ The v2 UI (`/v2`) needs **nothing extra**: its settings page is generated at bui
     - Pruning: `session_history_ttl_days` (90) and `session_history_db_size_limit_mb` (256).
       Vibepollo's defaults are 0 = unbounded.
   - ⚠️ `libsqlite3.a` is linked **statically** (`windows.cmake`), like the C++ runtime: the release
-    ships no `sqlite3.dll`. CI installs `mingw-w64-ucrt-x86_64-sqlite3`.
+    ships no `sqlite3.dll`. The build needs `mingw-w64-ucrt-x86_64-sqlite3` (the release workflow installs it).
   - ⚠️ `session_history.cpp` / `session_history_sampler.cpp` include `stream.h` **first**: asio needs
     WinSock2 before anything pulls in `windows.h`. Same reason `platform/windows/host_stats.cpp` opens
     with `<winsock2.h>`, or `netioapi.h` hides `MIB_IF_ROW2`.
@@ -501,7 +501,8 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
   and `state.json` (Playnite running, mode, running game with `starting`). It reads stop requests
   from `commands\` and kills the game's process tree. Install: copy `bin\Release\` to
   `%APPDATA%\Playnite\Extensions\LavApolloLink\`, or double-click the `.pext` (a zip of
-  `LavApolloLink.dll`, `extension.yaml`, `icon.png`) attached to the dev prereleases.
+  `LavApolloLink.dll`, `extension.yaml`, `icon.png`) attached to the 2.4.9x prereleases. Version
+  in `extension.yaml` (1.0.1: the sun-on-a-screen icon).
 - **Host** `src/playnite.{h,cpp}`: parsing (tested in `tests/unit/test_playnite.cpp`), stop
   requests, and `watch_t`, which ends a game app's session when its game closes (seen then gone,
   or never seen within 120 s).
@@ -659,9 +660,23 @@ through Crowdin (`crowdin.yml`); only edit `public/assets/locale/en.json`.
 
 ## Release
 
-`.github/workflows/release.yml` builds the Windows installer + portable zip and publishes a GitHub
-release, triggered by pushing a `v*` tag or by manual dispatch with a version input. There is no CI
-test job: run `test_sunshine` locally.
+Releases are **built on the maintainer's PC** and uploaded with `gh release`, to spare the Actions
+quota (decision of 2026-11-23). There is no release script here: reproduce what the workflow does --
+`BUILD_VERSION=vX.Y.Z` (plus `BRANCH`/`COMMIT`) in the environment for `cmake/prep/build_version.cmake`,
+`cmake -B build -G Ninja -S .`, `ninja -C build`, `cpack -G NSIS` and `cpack -G ZIP`, then
+`LavApollo-<version>-Windows-installer.exe`, `LavApollo-<version>-Windows-portable.zip` and
+`LavApollo-<version>-SHA256SUMS.txt` (mandatory for the updater, below). Locally, keep ninja at `-j 3`
+(more runs out of memory).
+
+`.github/workflows/release.yml` is **manual only** (`workflow_dispatch`, inputs `version` and
+`prerelease`); pushing a `v*` tag no longer starts anything. It remains the fallback for a release
+that must carry the VHF driver: its signing secrets live only in GitHub (VHF virtual gamepad, above), so a local build
+ships without it (NSIS skips it). The workflow tags the commit it built
+(`target_commitish`), not the default branch. There is no CI test job: run `test_sunshine` locally.
+
+**No Dev channel on the host.** The updater reads `/releases/latest` only, and CMake/NSIS need numeric
+versions, so work for LavArtemis Dev (Playnite) goes out as **prereleases numbered 2.4.9x** (2.4.90 to
+2.4.93 so far), with the LavApollo Link `.pext` attached; the installed updater never offers them.
 
 ⚠️ **CMake is pinned to 4.4.2 in the release workflow** ("Pin CMake 4.4" step). The runner installs
 the latest MSYS2 CMake, and 4.5 rejects Boost 1.89's own `libs/locale` CMakeLists (`source_group TREE

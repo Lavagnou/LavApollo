@@ -26,10 +26,11 @@ player as if they were sitting at the host.
   operation permission get it automatically when upgrading.
 
 **On the client** (LavArtemis), turn on *Send my microphone to the host*. It is off by default.
-- Desktop: *Settings → LavArtemis Features → Microphone*, with a choice of microphone. Mute it while
+- Desktop: *Réglages → Audio* in LavArtemis Dev (*Settings → LavArtemis Features → Microphone* in the
+  stable app), with a choice of microphone. The setting is device-wide, outside the settings profiles. Mute it while
   streaming with **Ctrl+Alt+Shift+U** or from the quick menu; "Microphone muted" stays on screen until
   unmuted. Use a headset: the desktop client has no echo cancellation.
-- Android: *Settings → Audio*. The microphone permission is asked for when the setting is turned on.
+- Android: *Réglages → Audio* (device-wide, outside the profiles, in LavArtemis Dev). The microphone permission is asked for when the setting is turned on.
   Mute it from the in-game menu, or with Ctrl+Alt+Shift+U on a keyboard. Android's voice capture cancels
   the echo of the device's own speaker.
 

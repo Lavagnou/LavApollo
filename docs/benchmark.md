@@ -1,7 +1,8 @@
 # Benchmark
 
 LavArtemis clients (desktop and Android) can compare their streaming settings on a LavApollo host with
-real numbers instead of impressions: right-click (long-press on Android) a host, then **Benchmark**. The
+real numbers instead of impressions: **Benchmark** in a PC's menu of *Mes PC* (LavArtemis Dev; in the
+stable clients, right-click or long-press a host). The
 client streams the same animated scene several times in a row, each time with another codec, bitrate or
 frame pacing mode, and ends with a report giving every combination a **latency score** and a
 **smoothness score**, compared with the settings the user streams with today.
@@ -68,7 +69,7 @@ remaining runs that would fall back the same way are skipped.
 Codecs are first filtered by what the host advertises (`ServerCodecModeSupport`); what the client cannot
 decode shows up as a fallback on its first run. PyroWave only on the desktop client, when it supports it:
 Android decodes it natively, out of reach of the stats the benchmark reads. Bitrates are rounded to 500 kbps and clamped to the
-client's range. *Default* means the client's default bitrate for the stream's resolution and rate.
+client's range (500 kbps to 800 Mbit/s on both, the end of their bitrate slider). *Default* means the client's default bitrate for the stream's resolution and rate.
 
 - **Quick**: baseline · every other codec at the baseline bitrate · the first two pacing modes of the
   platform list that differ from the baseline's, on the baseline codec · baseline again.

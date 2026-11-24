@@ -1,6 +1,7 @@
 # Intégration Playnite (extension + LavApollo + clients) — design
 
-*2026-11-23 — validé d'avance par l'utilisateur. Livré d'abord dans la version Dev des clients.*
+*2026-11-23 — validé d'avance par l'utilisateur. Livré dans les prereleases LavApollo 2.4.90 à 2.4.93,
+extension LavApollo Link 1.0.1 (`.pext` joint à ces prereleases), et dans LavArtemis Dev seulement.*
 
 ## Pourquoi
 
@@ -72,20 +73,25 @@ bureau comme en Fullscreen, et démarre Playnite s'il est fermé) : pas besoin d
 - `src/playnite.{h,cpp}` : lecture de `library.json` (+ cache par date de modification), lecture de
   `state.json`, écriture des commandes.
 - **Applis virtuelles** : à chaque construction de la liste (`proc::parse`), un jeu Playnite devient une
-  appli : `uuid` = id Playnite (GUID stable), `name` = nom, `image-path` = sa jaquette PNG, pas de `cmd`,
+  appli : `uuid` = id Playnite (GUID stable), `name` = nom, `image-path` = sa jaquette PNG (sans jaquette, `/appasset` répond 404 et les clients
+  affichent le nom du jeu, jamais la boîte générique), pas de `cmd`,
   lancement par `detached` = l'URI Playnite. Marquées `playnite-game` (champ interne). Si l'utilisateur a
   déjà une appli du même uuid dans `apps.json`, la sienne gagne.
 - Liste rafraîchie quand `library.json` change (vérifié au plus toutes les 5 s, depuis `applist`).
 - **Fin de session** : tant qu'une appli Playnite-jeu tourne, LavApollo regarde `state.json` ; quand le
   jeu qu'il a lancé apparaît puis disparaît (ou n'est jamais apparu au bout de 120 s), il termine l'appli.
 - **Quitter** une appli Playnite-jeu depuis le client : LavApollo écrit `stop-game`, puis termine l'appli.
+- **« Quitter le jeu »** (menu en jeu des clients) : `/playnite-quit-game` écrit `stop-game` pour le jeu en
+  cours dans Playnite et garde le stream, qui revient à Playnite (404 si aucun jeu ne tourne).
 - **Jeu dans Playnite Fullscreen** : si l'appli en cours est « hôte Playnite » (`playnite-host: true` dans
-  `apps.json`, ou, à défaut, une appli dont la commande lance `Playnite.FullscreenApp.exe`) et que le client
+  `apps.json`, ou, à défaut, une appli dont la commande lance `Playnite.FullscreenApp.exe` ou
+  `Playnite.DesktopApp.exe`) et que le client
   lance une appli Playnite-jeu, LavApollo **ne refuse pas** : il ouvre l'URI du jeu, garde l'appli Playnite
   en cours et répond comme une reprise (le stream continue).
 - `serverinfo` ajoute `PlayniteGameName` / `PlayniteGameUuid` (jeu en cours d'après `state.json`) et
-  `PlayniteHostRunning` ; `applist` ajoute `IsPlayniteGame=1` aux applis Playnite-jeu. Absents si
-  l'extension n'est pas là : les anciens clients ne voient rien de nouveau.
+  `PlayniteHostRunning` (absents si l'extension n'est pas là). `applist` ne liste les jeux qu'avec
+  **`playnite=1`** (envoyé par LavArtemis Dev), avec `IsPlayniteGame=1`, et marque l'hôte Playnite
+  `IsPlayniteHost=1` : la stable et les autres clients ne voient rien de nouveau.
 
 ### Clients (LavArtemis Dev, desktop puis Android)
 
@@ -96,5 +102,9 @@ bureau comme en Fullscreen, et démarre Playnite s'il est fermé) : pas besoin d
 ## Laissé au constructeur
 
 - Délais exacts (5 s, 120 s), nommage des logs, forme du menu Playnite.
-- Ordre des jeux dans la liste : après les applis de l'utilisateur, **le plus récemment joué d'abord**
-  (tri « Activité récente » de Playnite, demandé par l'utilisateur), jamais joués à la fin par nom.
+
+## Ordre des jeux (2.4.93)
+
+Après les applis de l'utilisateur, **le plus récemment joué d'abord** (tri « Activité récente » de
+Playnite, `lastActivity` de `library.json`, demandé par l'utilisateur), jamais joués à la fin par nom.
+Les clients Dev gardent cet ordre.
