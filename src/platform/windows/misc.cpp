@@ -53,6 +53,7 @@
 #include "src/globals.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/playnite.h"
 #include "src/test_host.h"
 #include "src/utility.h"
 
@@ -1043,7 +1044,18 @@ namespace platf {
    * @param group A pointer to a `bp::group` object to which the new process should belong (may be `nullptr`).
    * @return A `bp::child` object representing the new process, or an empty `bp::child` object if the launch fails.
    */
-  bp::child run_command(bool elevated, bool interactive, const std::string &cmd, boost::filesystem::path &working_dir, const bp::environment &env, FILE *file, std::error_code &ec, bp::group *group) {
+  bp::child run_command(bool elevated, bool interactive, const std::string &cmd_in, boost::filesystem::path &working_dir, const bp::environment &env, FILE *file, std::error_code &ec, bp::group *group) {
+    std::string cmd = cmd_in;
+    if (test_host::enabled()) {
+      // Test host mode: nothing runs on the real system. The command is only logged; a no-op that exits
+      // at once stands in, and process.cpp's auto-detach keeps the app "running" until it is quit.
+      test_host::log("commands", {{"cmd", cmd_in}, {"elevated", elevated}, {"interactive", interactive}, {"working_dir", working_dir.string()}});
+      playnite::test_host_launch(cmd_in);
+      cmd = "cmd.exe /d /c exit 0";
+      elevated = false;
+      interactive = false;
+    }
+
     std::wstring start_dir = from_utf8(working_dir.string());
     HANDLE job = group ? group->native_handle() : nullptr;
     STARTUPINFOEXW startup_info = create_startup_info(file, job ? &job : nullptr, ec);
@@ -1999,14 +2011,28 @@ namespace platf {
     return std::make_unique<win32_high_precision_timer>();
   }
 
+  // Test host mode: the fake PC's clipboard lives in memory, the real one is never touched.
+  static std::string &test_host_clipboard() {
+    static std::string text;
+    return text;
+  }
+
   std::string
   get_clipboard() {
+    if (test_host::enabled()) {
+      return test_host_clipboard();
+    }
     std::string currentClipboard = to_utf8(getClipboardData());
     return currentClipboard;
   }
 
   bool
   set_clipboard(const std::string& content) {
+    if (test_host::enabled()) {
+      test_host_clipboard() = content;
+      test_host::log("events", {{"clipboard_set", content}});
+      return true;
+    }
     std::wstring cpContent = from_utf8(ensureCrLf(content));
     return !setClipboardData(cpContent);
   }

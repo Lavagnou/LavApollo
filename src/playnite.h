@@ -64,6 +64,11 @@ namespace playnite {
   /// Asks the extension to close `game_id`. No-op when the extension's commands folder is missing.
   void request_stop(const std::string &game_id);
 
+  /// Test host mode: when `cmd` is a Playnite launch command (launch_command()), logs
+  /// `{"playnite_launch": id}` to the events stream and writes the fake library's state.json as
+  /// "that game is running". Returns whether `cmd` was one. Does nothing outside test mode.
+  bool test_host_launch(const std::string &cmd);
+
   /// Whether an app is the user's Playnite front end (its command starts Playnite).
   bool is_playnite_command(const std::string &cmd);
 

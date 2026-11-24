@@ -4,8 +4,12 @@
  */
 #include "../tests_common.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <thread>
+
+#include <boost/process/v1.hpp>
 
 #include <src/config.h>
 #include <src/platform/common.h>
@@ -207,4 +211,26 @@ TEST_F(TestHost, SkipIsTrueOnlyInTestMode) {
   EXPECT_TRUE(test_host::enabled());
   EXPECT_TRUE(test_host::skip("virtual display driver"));
   EXPECT_TRUE(test_host::skip("virtual display driver"));  // every call, not only the first
+}
+
+TEST_F(TestHost, RunCommandIsLoggedNotRun) {
+  parse("test_host = enabled\n");
+  auto marker = tmp / "ran.txt";
+  auto cmd = "cmd /c echo x > \"" + marker.string() + "\"";
+  boost::filesystem::path working_dir = tmp.string();
+  std::error_code ec;
+  auto env = boost::this_process::environment();
+
+  auto child = platf::run_command(true, true, cmd, working_dir, env, nullptr, ec, nullptr);
+  EXPECT_FALSE(ec);
+  child.wait();  // the stand-in exits at once; give a real run every chance to finish too
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+  EXPECT_FALSE(fs::exists(marker));
+  auto lines = read_lines(test_host::dir() / "commands.jsonl");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0]["cmd"], cmd);
+  EXPECT_EQ(lines[0]["elevated"], true);
+  EXPECT_EQ(lines[0]["interactive"], true);
+  EXPECT_EQ(lines[0]["working_dir"], tmp.string());
 }

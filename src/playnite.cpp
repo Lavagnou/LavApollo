@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "logging.h"
+#include "test_host.h"
 
 using namespace std::literals;
 namespace fs = std::filesystem;
@@ -217,8 +218,66 @@ namespace playnite {
     return "cmd /c start \"\" \"playnite://playnite/start/" + lower(game_id) + "\"";
   }
 
+  namespace {
+    // Test host mode: the fake PC's own Playnite state (the exchange folder is redirected with %ProgramData%).
+    void write_test_state(const nlohmann::json &game) {
+      nlohmann::json state;
+      state["playniteRunning"] = true;
+      state["mode"] = "fullscreen";
+      if (!game.is_null()) {
+        state["game"] = game;
+      }
+      auto dir = exchange_dir();
+      std::error_code ec;
+      fs::create_directories(dir, ec);
+      auto tmp = dir / "state.json.tmp";
+      {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << state.dump();
+      }
+      fs::rename(tmp, dir / "state.json", ec);
+      if (ec) {
+        BOOST_LOG(warning) << "Playnite: test host cannot write state.json: "sv << ec.message();
+      }
+    }
+  }  // namespace
+
+  bool test_host_launch(const std::string &cmd) {
+    static const std::string marker = "playnite://playnite/start/";
+    if (!test_host::enabled()) {
+      return false;
+    }
+    auto at = lower(cmd).find(marker);
+    if (at == std::string::npos) {
+      return false;
+    }
+    auto begin = at + marker.size();
+    auto end = cmd.find_first_of("\" ", begin);
+    auto id = upper(cmd.substr(begin, end == std::string::npos ? std::string::npos : end - begin));
+    if (!is_guid(id)) {
+      return false;
+    }
+
+    std::string name;
+    for (auto &game : load_library()) {
+      if (game.id == id) {
+        name = game.name;
+        break;
+      }
+    }
+    test_host::log("events", {{"playnite_launch", lower(id)}});
+    write_test_state({{"id", lower(id)}, {"name", name}, {"starting", false}});
+    return true;
+  }
+
   void request_stop(const std::string &game_id) {
     static std::atomic<unsigned> counter {0};
+
+    if (test_host::enabled()) {
+      test_host::log("events", {{"playnite_stop", lower(game_id)}});
+      write_test_state(nullptr);
+      return;
+    }
 
     // The extension creates this folder, and owns it: that is what lets it delete our files.
     auto dir = exchange_dir() / "commands";

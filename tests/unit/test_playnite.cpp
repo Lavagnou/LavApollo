@@ -4,6 +4,10 @@
  */
 #include "../tests_common.h"
 
+#include <cstdlib>
+#include <fstream>
+
+#include <src/config.h>
 #include <src/playnite.h>
 
 using namespace std::chrono_literals;
@@ -128,4 +132,62 @@ TEST(Playnite, inactiveWatchKeepsRunning) {
   watch_t watch;
   EXPECT_FALSE(watch.active());
   EXPECT_EQ(watch.update(idle(), std::chrono::steady_clock::now()), watch_t::verdict_e::running);
+}
+
+namespace {
+  class PlayniteTestHost: public ::testing::Test {
+  protected:
+    void SetUp() override {
+      const char *old = std::getenv("ProgramData");
+      had_env = old != nullptr;
+      if (old) {
+        old_env = old;
+      }
+      tmp = std::filesystem::temp_directory_path() / ("lav_playnite_th_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+      std::filesystem::remove_all(tmp);
+      _putenv_s("ProgramData", tmp.string().c_str());
+      std::filesystem::create_directories(playnite::exchange_dir() / "commands");
+      saved = config::sunshine.test_host;
+      config::sunshine.test_host = true;
+      std::ofstream {playnite::exchange_dir() / "library.json"} << kLibrary;
+    }
+
+    void TearDown() override {
+      config::sunshine.test_host = saved;
+      _putenv_s("ProgramData", had_env ? old_env.c_str() : "");
+      std::error_code ec;
+      std::filesystem::remove_all(tmp, ec);
+    }
+
+    std::string state_text() {
+      std::ifstream in {playnite::exchange_dir() / "state.json"};
+      return {std::istreambuf_iterator<char>(in), {}};
+    }
+
+    std::filesystem::path tmp;
+    bool had_env = false;
+    bool saved = false;
+    std::string old_env;
+  };
+}  // namespace
+
+TEST_F(PlayniteTestHost, TestHostLaunchWritesRunningState) {
+  auto id = "fb5d018a-058e-4ffe-ae4b-3fd3d48a5b28";
+  EXPECT_TRUE(playnite::test_host_launch(playnite::launch_command(id)));
+  EXPECT_FALSE(playnite::test_host_launch("cmd /c echo hello"));  // not a Playnite launch
+
+  auto state = playnite::parse_state(state_text());
+  ASSERT_TRUE(state);
+  EXPECT_TRUE(state->playnite_running);
+  ASSERT_TRUE(state->game);
+  EXPECT_EQ(state->game->id, "FB5D018A-058E-4FFE-AE4B-3FD3D48A5B28");
+  EXPECT_EQ(state->game->name, "Cyberpunk 2077");
+  EXPECT_FALSE(state->game->starting);
+
+  // A stop request empties the game again
+  playnite::request_stop(id);
+  state = playnite::parse_state(state_text());
+  ASSERT_TRUE(state);
+  EXPECT_TRUE(state->playnite_running);
+  EXPECT_FALSE(state->game);
 }
