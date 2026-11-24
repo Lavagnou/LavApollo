@@ -864,6 +864,9 @@ namespace proc {
                         playnite::watch_t {_app.playnite_game_id, _app_launch_time};
 
   #ifdef _WIN32
+    // Test host mode never toggles HDR on a real display. No thread means mode_changed_display and
+    // initial_hdr stay untouched, so terminate() has nothing to revert either.
+    if (!test_host::skip("HDR toggle")) {
     auto resetHDRThread = std::thread([this, enable_hdr = launch_session->enable_hdr]{
       // Windows doesn't seem to be able to set HDR correctly when a display is just connected / changed resolution,
       // so we have tooggle HDR for the virtual display manually after a delay.
@@ -917,6 +920,7 @@ namespace proc {
     });
 
     resetHDRThread.detach();
+    }
   #endif
 
     fg.disable();
