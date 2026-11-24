@@ -608,7 +608,7 @@ $pc = "$env:TEMP\lavtesthost\pc1"; New-Item -ItemType Directory -Force "$pc\pd" 
 # apps.json : {"env":{},"apps":[{"name":"Bureau","cmd":""}]}
 $env:LAVAPOLLO_APPDATA = $pc; $env:ProgramData = "$pc\pd"
 $repo = "<repo>"   # racine de LavApollo, chemin absolu
-Start-Process "$repouild	\sunshine.exe" -ArgumentList "`"$pc\sunshine.conf`"" -WorkingDirectory "$repouild	" -WindowStyle Hidden -PassThru
+Start-Process "$repo\build\t\sunshine.exe" -ArgumentList "`"$pc\sunshine.conf`"" -WorkingDirectory "$repo\build\t" -WindowStyle Hidden -PassThru
 curl.exe -s http://127.0.0.1:40989/serverinfo      # LavTestHost, Test-PC-1
 ```
 
