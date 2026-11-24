@@ -2792,9 +2792,6 @@ namespace confighttp {
     send_response(response, output_tree);
   }
 
-  /**
-   * @brief Start the HTTPS server.
-   */
   bool test_pin_route_enabled() {
     return test_host::enabled();
   }
@@ -2838,6 +2835,9 @@ namespace confighttp {
     }
   }
 
+  /**
+   * @brief Start the HTTPS server.
+   */
   void start() {
     auto shutdown_event = mail::man->event<bool>(mail::shutdown);
     auto port_https = net::map_port(PORT_HTTPS);

@@ -327,11 +327,12 @@ TEST(HttpPairing, TestHostServerinfoMarks) {
     EXPECT_EQ(tree.get<std::string>("root.appversion"), "1.0.0.0");
     EXPECT_EQ(tree.get<std::string>("root.mac"), "02:00:00:00:00:01");
 
-    // The plain HTTP answer carries no MAC (a placeholder is added elsewhere): none appears here.
+    // The plain HTTP answer (read before pairing) carries a placeholder MAC: the fake one replaces it too.
     boost::property_tree::ptree http_tree;
     http_tree.put("root.appversion", "real");
+    http_tree.put("root.mac", "00:00:00:00:00:00");
     nvhttp::apply_test_host_serverinfo(http_tree);
-    EXPECT_FALSE(http_tree.get_optional<std::string>("root.mac"));
+    EXPECT_EQ(http_tree.get<std::string>("root.mac"), "02:00:00:00:00:01");
   }
 }
 

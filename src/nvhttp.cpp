@@ -1016,7 +1016,8 @@ namespace nvhttp {
     if (!config::sunshine.test_host_appversion.empty()) {
       tree.put("root.appversion", config::sunshine.test_host_appversion);
     }
-    // Only where a MAC was already answered: the plain HTTP answer carries none.
+    // Both answers carry a MAC: the real one over paired HTTPS, a placeholder over plain HTTP. The fake MAC
+    // replaces either, so the fixture's MAC is visible to a client before it is paired.
     if (!config::sunshine.test_host_mac.empty() && tree.get_optional<std::string>("root.mac")) {
       tree.put("root.mac", config::sunshine.test_host_mac);
     }

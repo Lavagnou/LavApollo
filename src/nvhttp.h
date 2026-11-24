@@ -202,7 +202,8 @@ namespace nvhttp {
    *
    * No-op outside test host mode. Adds `LavTestHost` (and `LavTestHostThisPc` if the fixture allows
    * streaming to this PC), replaces `appversion` with `test_host_appversion` if set, and replaces `mac`
-   * with `test_host_mac` if set -- only when the answer already carries a MAC (paired HTTPS requests).
+   * with `test_host_mac` if set -- on the paired HTTPS answer and
+   * over the unpaired placeholder of the plain HTTP one (only if the answer carries a `mac` at all).
    */
   void apply_test_host_serverinfo(boost::property_tree::ptree &tree);
 
