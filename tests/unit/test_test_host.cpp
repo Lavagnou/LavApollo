@@ -107,6 +107,29 @@ TEST_F(TestHost, LogsOneJsonLinePerEvent) {
   EXPECT_LE(lines[0]["t"].get<long long>(), lines[1]["t"].get<long long>());
 }
 
+TEST_F(TestHost, KeepsCallerTimestamp) {
+  test_host::log("events", {{"type", "x"}, {"t", 12345}});
+  auto lines = read_lines(test_host::dir() / "events.jsonl");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0]["t"], 12345);
+}
+
+TEST_F(TestHost, UnwritableLocationDoesNotThrowNorWrite) {
+  // A regular file where the appdata directory should be: neither testhost/ nor any log can be created.
+  auto blocker = tmp / "not_a_dir";
+  { std::ofstream {blocker} << "x"; }
+  _putenv_s("LAVAPOLLO_APPDATA", blocker.string().c_str());
+
+  EXPECT_NO_THROW(test_host::log("commands", {{"cmd", "a"}}));
+  EXPECT_NO_THROW(test_host::log("commands", {{"cmd", "b"}}));
+  EXPECT_FALSE(fs::exists(test_host::dir() / "commands.jsonl"));
+
+  // And logging works again once the location is fixed.
+  _putenv_s("LAVAPOLLO_APPDATA", tmp.string().c_str());
+  test_host::log("commands", {{"cmd", "c"}});
+  EXPECT_EQ(read_lines(test_host::dir() / "commands.jsonl").size(), 1u);
+}
+
 TEST_F(TestHost, ConfigWithoutTestHostKeepsDefaults) {
   auto sunshine_before = config::sunshine;
   auto limiter_before = config::frame_limiter.enable;
