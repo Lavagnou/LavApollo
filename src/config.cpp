@@ -636,6 +636,10 @@ namespace config {
     true,  // session_history_enabled
     90,  // session_history_ttl_days
     256,  // session_history_db_size_limit_mb
+    false,  // test_host
+    {},  // test_host_mac
+    {},  // test_host_appversion
+    false,  // test_host_this_pc
   };
 
   bool endline(char ch) {
@@ -1408,6 +1412,11 @@ namespace config {
     }
 #endif
 
+    bool_f(vars, "test_host", sunshine.test_host);
+    string_f(vars, "test_host_mac", sunshine.test_host_mac);
+    string_f(vars, "test_host_appversion", sunshine.test_host_appversion);
+    bool_f(vars, "test_host_this_pc", sunshine.test_host_this_pc);
+
     string_restricted_f(vars, "address_family", sunshine.address_family, {"ipv4"sv, "both"sv});
 
     bool upnp = false;
@@ -1480,6 +1489,19 @@ namespace config {
       for (auto &[var, _] : vars) {
         std::cout << "Warning: Unrecognized configurable option ["sv << var << ']' << std::endl;
       }
+    }
+
+    if (sunshine.test_host) {
+      // Test host mode: nothing may leave the machine or touch the real system.
+      sunshine.enable_discovery = false;
+      sunshine.system_tray = false;
+      sunshine.update_auto_check = false;
+      sunshine.flags[flag::UPNP] = false;
+      sunshine.address_family = "ipv4";
+      audio.mic_set_default = false;
+      frame_limiter.enable = false;
+      video.encoder = "software";
+      video.capture = "synthetic";
     }
 
     ::video::active_hevc_mode = video.hevc_mode;

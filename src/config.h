@@ -326,6 +326,12 @@ namespace config {
     bool session_history_enabled;  ///< Record sessions, samples and events in SQLite
     int session_history_ttl_days;  ///< Delete ended sessions older than this (0: never)
     int session_history_db_size_limit_mb;  ///< Prune the oldest ended sessions past this size (0: never)
+
+    // Test host mode (test_host.h): a sandboxed fake PC for automated client tests
+    bool test_host;  ///< test_host = enabled
+    std::string test_host_mac;  ///< Fake MAC advertised in serverinfo (empty: the real one)
+    std::string test_host_appversion;  ///< Fake appversion advertised (empty: the real one)
+    bool test_host_this_pc;  ///< Allow streaming to the PC the host runs on
   };
 
   /**

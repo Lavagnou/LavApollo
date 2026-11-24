@@ -129,6 +129,10 @@ namespace platf {
   decltype(WlanSetInterface) *fn_WlanSetInterface = nullptr;
 
   std::filesystem::path appdata() {
+    // Test host mode: an isolated data directory (the tests set this).
+    if (const auto *override_dir = std::getenv("LAVAPOLLO_APPDATA"); override_dir && *override_dir) {
+      return std::filesystem::path {override_dir};
+    }
     WCHAR sunshine_path[MAX_PATH];
     GetModuleFileNameW(nullptr, sunshine_path, _countof(sunshine_path));
     return std::filesystem::path {sunshine_path}.remove_filename() / L"config"sv;

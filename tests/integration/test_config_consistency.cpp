@@ -444,7 +444,11 @@ TEST_F(ConfigConsistencyTest, AllConfigOptionsExistInAllFiles) {
 
   // Options that are internal/special and shouldn't be in UI/docs
   const std::set<std::string, std::less<>> internalOptions = {
-    "flags"  // Internal config flags, not user-configurable
+    "flags",  // Internal config flags, not user-configurable
+    "test_host",  // Test host mode (test_host.h): automated tests only, not a user setting
+    "test_host_mac",
+    "test_host_appversion",
+    "test_host_this_pc"
   };
 
   std::vector<std::string> missingFromFiles;
@@ -626,7 +630,11 @@ TEST_F(ConfigConsistencyTest, TestFrameworkDetectsMissingOptions) {
 
   // Options that are internal/special and shouldn't be in UI/docs
   std::set<std::string, std::less<>> internalOptions = {
-    "flags"  // Internal config flags, not user-configurable
+    "flags",  // Internal config flags, not user-configurable
+    "test_host",  // Test host mode (test_host.h): automated tests only, not a user setting
+    "test_host_mac",
+    "test_host_appversion",
+    "test_host_this_pc"
   };
 
   std::vector<std::string> missingFromFiles;
