@@ -28,6 +28,7 @@
 #include "src/logging.h"
 #include "src/mic_passthrough.h"
 #include "src/mic_passthrough_policy.h"
+#include "src/test_host.h"
 #include "src/utility.h"
 
 using namespace std::literals;
@@ -270,10 +271,22 @@ namespace mic_passthrough {
       std::uint64_t concealed = 0;
       std::uint64_t late = 0;
       std::uint64_t dropped_samples = 0;
+
+      // Test host mode: frames are counted, not played; when the count was last logged
+      std::chrono::steady_clock::time_point last_count_log;
     };
 
     std::mutex owner_mutex;
     owner_t owner;
+
+    /// Test host mode: logs the frames received so far, at most once a second unless `force`.
+    void log_frame_count(bool force) {
+      auto now = std::chrono::steady_clock::now();
+      if (force || now - owner.last_count_log >= 1s) {
+        owner.last_count_log = now;
+        test_host::log("events", {{"mic_frames", owner.frames}});
+      }
+    }
 
     void push(const float *samples, int count) {
       if (count > 0) {
@@ -417,6 +430,11 @@ namespace mic_passthrough {
       return state_e::no_permission;
     }
 
+    // Test host mode has no device to look for: it always takes the microphone
+    if (test_host::enabled()) {
+      return state_e::ready;
+    }
+
     // Disabled in the Sound settings still counts: acquire() enables it for the session
     return device_present.load() == 1 ? state_e::ready : state_e::no_device;
   }
@@ -428,6 +446,17 @@ namespace mic_passthrough {
       BOOST_LOG(warning) << "Microphone passthrough: ["sv << device_name << "] asked for the microphone, but ["sv
                          << owner.device_name << "] is already using it"sv;
       return false;
+    }
+
+    // Test host mode: no device, no default changed. The frames are only counted (see submit)
+    if (test_host::enabled()) {
+      owner.session = session;
+      owner.device_name = device_name;
+      owner.tracker.reset();
+      owner.frames = owner.concealed = owner.late = owner.dropped_samples = 0;
+      owner.last_count_log = std::chrono::steady_clock::now();
+      BOOST_LOG(info) << "Microphone passthrough: ["sv << device_name << "]'s microphone is counted, not played (test host)"sv;
+      return true;
     }
 
     com_t com;
@@ -501,6 +530,13 @@ namespace mic_passthrough {
       return;
     }
 
+    if (test_host::enabled()) {
+      log_frame_count(true);
+      owner.session = nullptr;
+      BOOST_LOG(info) << "Microphone passthrough: ["sv << owner.device_name << "] stopped after "sv << owner.frames << " frames (test host)"sv;
+      return;
+    }
+
     com_t com;
     restore_defaults();
 
@@ -534,6 +570,12 @@ namespace mic_passthrough {
       return;
     }
 
+    if (test_host::enabled()) {
+      ++owner.frames;
+      log_frame_count(false);
+      return;
+    }
+
     auto data = reinterpret_cast<const unsigned char *>(frame->opus.data());
     auto size = static_cast<opus_int32>(frame->opus.size());
     auto frame_samples = opus_packet_get_nb_samples(data, size, SAMPLE_RATE);
@@ -559,7 +601,8 @@ namespace mic_passthrough {
   }
 
   void init() {
-    if (!config::audio.mic_passthrough) {
+    // Test host mode: no driver to install, no device to poll
+    if (!config::audio.mic_passthrough || test_host::enabled()) {
       return;
     }
 

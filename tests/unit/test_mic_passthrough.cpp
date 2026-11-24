@@ -134,3 +134,64 @@ TEST(MicPassthroughJitter, DropsOldestBackToTargetPastMaximum) {
   buffer.pull(out.data(), out.size());
   EXPECT_EQ(out[0], 202.0f);  // The newest 100 samples were kept
 }
+
+#ifdef _WIN32
+  #include <chrono>
+  #include <filesystem>
+  #include <fstream>
+  #include <thread>
+
+  #include <nlohmann/json.hpp>
+
+  #include <src/config.h>
+  #include <src/mic_passthrough.h>
+  #include <src/test_host.h>
+
+TEST(MicPassthrough, TestHostCountsFramesWithoutDevice) {
+  namespace fs = std::filesystem;
+  const char *old = std::getenv("LAVAPOLLO_APPDATA");
+  std::string old_value = old ? old : "";
+  auto tmp = fs::temp_directory_path() / "lav_test_mic_counts";
+  fs::remove_all(tmp);
+  fs::create_directories(tmp);
+  _putenv_s("LAVAPOLLO_APPDATA", tmp.string().c_str());
+  auto saved_host = config::sunshine.test_host;
+  auto saved_mic = config::audio.mic_passthrough;
+  config::sunshine.test_host = true;
+  config::audio.mic_passthrough = true;
+
+  // No virtual microphone anywhere: the state is still ready
+  EXPECT_EQ(mic_passthrough::state(crypto::PERM::microphone), mic_passthrough::state_e::ready);
+
+  int owner = 0;
+  ASSERT_TRUE(mic_passthrough::acquire(&owner, "test client"));
+  EXPECT_FALSE(mic_passthrough::acquire(&tmp, "second client"));  // still one owner
+
+  for (std::uint16_t i = 0; i < 3; ++i) {
+    mic_passthrough::submit(&owner, make_message(i, i * 960, 40));
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  mic_passthrough::submit(&owner, make_message(3, 3 * 960, 40));
+  mic_passthrough::release(&owner);
+
+  std::vector<long long> counts;
+  std::ifstream in {tmp / "testhost" / "events.jsonl"};
+  for (std::string line; std::getline(in, line);) {
+    auto event = nlohmann::json::parse(line);
+    if (event.contains("mic_frames")) {
+      counts.push_back(event["mic_frames"].get<long long>());
+    }
+  }
+
+  config::sunshine.test_host = saved_host;
+  config::audio.mic_passthrough = saved_mic;
+  _putenv_s("LAVAPOLLO_APPDATA", old_value.c_str());
+  std::error_code ec;
+  fs::remove_all(tmp, ec);
+
+  // One line a second while frames come in (4th frame, after 1.1 s), plus the final count on release
+  ASSERT_GE(counts.size(), 1u);
+  EXPECT_EQ(counts.front(), 4);
+  EXPECT_EQ(counts.back(), 4);
+}
+#endif

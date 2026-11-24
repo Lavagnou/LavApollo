@@ -17,10 +17,12 @@
 
 // local includes
 #include "audio_endpoints.h"
+#include "audio_synthetic.h"
 #include "misc.h"
 #include "src/config.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/test_host.h"
 
 // Must be the last included file
 // clang-format off
@@ -1392,6 +1394,11 @@ namespace platf {
   }
 
   std::unique_ptr<audio_control_t> audio_control() {
+    // Test host mode: a tone, no default endpoint touched, no driver installed
+    if (test_host::enabled()) {
+      return audio::synthetic_audio_control();
+    }
+
     auto control = std::make_unique<audio::audio_control_t>();
 
     if (control->init()) {
