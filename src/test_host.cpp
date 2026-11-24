@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <mutex>
+#include <set>
 #include <string>
 
 // local includes
@@ -35,32 +36,29 @@ namespace test_host {
     }
 
     std::lock_guard lock {log_mutex};
-    static std::filesystem::path ready_dir;  // last directory created successfully
-    static std::filesystem::path warned_for;  // last file a failure was reported for
+    static std::set<std::filesystem::path> reported;  // files a failure was already reported for
 
     auto directory = dir();
     auto file = directory / (std::string {stream} + ".jsonl");
 
+    // Open first; only create the directory when that fails, so it comes back by itself if it goes away.
     std::error_code ec;
-    if (directory != ready_dir) {
+    std::ofstream out {file, std::ios::app};
+    if (!out) {
       std::filesystem::create_directories(directory, ec);
       if (!ec) {
-        ready_dir = directory;
+        out.clear();
+        out.open(file, std::ios::app);
       }
     }
-
-    std::ofstream out;
-    if (!ec) {
-      out.open(file, std::ios::app);
-    }
     if (!out) {
-      // These files are the only evidence channel of the mode: say so once per file instead of dropping silently.
-      if (warned_for != file) {
-        warned_for = file;
+      // These files are the only evidence channel of the mode: say so once instead of dropping silently.
+      if (reported.insert(file).second) {
         BOOST_LOG(warning) << "Test host: cannot write "sv << file.string() << (ec ? " ("s + ec.message() + ")" : ""s);
       }
       return;
     }
+    reported.erase(file);  // a later failure is worth a new warning
     out << line.dump() << '\n';
   }
 }  // namespace test_host

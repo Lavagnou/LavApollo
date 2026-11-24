@@ -130,6 +130,20 @@ TEST_F(TestHost, UnwritableLocationDoesNotThrowNorWrite) {
   EXPECT_EQ(read_lines(test_host::dir() / "commands.jsonl").size(), 1u);
 }
 
+TEST_F(TestHost, RecoversWhenTheDirectoryIsRemoved) {
+  test_host::log("events", {{"n", 1}});
+  ASSERT_EQ(read_lines(test_host::dir() / "events.jsonl").size(), 1u);
+
+  fs::remove_all(test_host::dir());
+  test_host::log("events", {{"n", 2}});
+  test_host::log("input", {{"n", 3}});
+
+  auto events = read_lines(test_host::dir() / "events.jsonl");
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0]["n"], 2);
+  EXPECT_EQ(read_lines(test_host::dir() / "input.jsonl").size(), 1u);
+}
+
 TEST_F(TestHost, ConfigWithoutTestHostKeepsDefaults) {
   auto sunshine_before = config::sunshine;
   auto limiter_before = config::frame_limiter.enable;

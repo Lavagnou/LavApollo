@@ -28,7 +28,8 @@ namespace test_host {
    * @brief Append one JSON line to `dir()/<stream>.jsonl` ("input", "commands" or "events").
    *
    * The event gets a `"t"` field (milliseconds since the process started) unless it already has one.
-   * Thread safe. A write failure (unwritable directory, ...) never throws: one warning is logged per file.
+   * Thread safe. A write failure (unwritable directory, ...) never throws: one warning is
+   * logged per file and failure (a later success re-arms it). A directory that disappears is recreated.
    */
   void log(std::string_view stream, const nlohmann::json &event);
 }  // namespace test_host
