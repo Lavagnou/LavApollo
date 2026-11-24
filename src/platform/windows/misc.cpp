@@ -53,6 +53,7 @@
 #include "src/globals.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/test_host.h"
 #include "src/utility.h"
 
 // UDP_SEND_MSG_SIZE was added in the Windows 10 20H1 SDK
@@ -1196,6 +1197,13 @@ namespace platf {
   }
 
   void streaming_will_start() {
+    // Test host mode: no timer resolution, MMCSS, priority class, NVIDIA profile, WLAN or Mouse Keys
+    // change on the machine the real LavApollo runs on. streaming_will_stop() skips the same way,
+    // so nothing is "restored" that was never changed.
+    if (test_host::skip("streaming system tweaks (timer, MMCSS, WLAN, Mouse Keys, NVIDIA profile)")) {
+      return;
+    }
+
     static std::once_flag load_wlanapi_once_flag;
     std::call_once(load_wlanapi_once_flag, []() {
       // wlanapi.dll is not installed by default on Windows Server, so we load it dynamically
@@ -1310,6 +1318,10 @@ namespace platf {
   }
 
   void streaming_will_stop() {
+    if (test_host::enabled()) {
+      return;  // streaming_will_start() changed nothing (logged there)
+    }
+
     // Demote ourselves back to normal priority class
     SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
 

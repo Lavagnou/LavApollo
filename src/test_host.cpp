@@ -29,6 +29,14 @@ namespace test_host {
     return platf::appdata() / "testhost";
   }
 
+  bool skip(std::string_view what) {
+    if (!enabled()) {
+      return false;
+    }
+    BOOST_LOG(info) << "test host: skipping "sv << what;
+    return true;
+  }
+
   void log(std::string_view stream, const nlohmann::json &event) {
     nlohmann::json line = event.is_object() ? event : nlohmann::json {{"value", event}};
     if (!line.contains("t")) {

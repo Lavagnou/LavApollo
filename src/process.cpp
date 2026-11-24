@@ -40,6 +40,7 @@
 #include "process.h"
 #include "httpcommon.h"
 #include "system_tray.h"
+#include "test_host.h"
 #include "utility.h"
 #include "video.h"
 #include "uuid.h"
@@ -92,6 +93,11 @@ namespace proc {
   }
 
   void initVDisplayDriver() {
+    // Test host mode never opens SudoVDA: the status stays UNKNOWN, so every caller takes its
+    // "driver not available" path (no virtual display, nothing to remove afterwards).
+    if (test_host::skip("virtual display driver")) {
+      return;
+    }
     vDisplayDriverStatus = VDISPLAY::openVDisplayDevice();
     if (vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK) {
       if (!VDISPLAY::startPingThread(onVDisplayWatchdogFailed)) {
@@ -110,6 +116,9 @@ namespace proc {
   }  // namespace
 
   std::string create_remote_monitor_display(const rtsp_stream::launch_session_t &session) {
+    if (test_host::skip("Remote Monitor virtual display")) {
+      return {};  // same as a missing driver: the caller streams without the extra display
+    }
     if (vDisplayDriverStatus != VDISPLAY::DRIVER_STATUS::OK) {
       initVDisplayDriver();
     }
@@ -339,7 +348,12 @@ namespace proc {
     }
 
 #ifdef _WIN32
-    if (
+    // Test host mode: no virtual display, no display mode change, no display_device configuration.
+    // The launch goes on without a display; capture is synthetic.
+    const bool test_mode = test_host::skip("virtual display creation and display configuration");
+    if (test_mode) {
+      launch_session->virtual_display = false;
+    } else if (
       config::video.headless_mode        // Headless mode
       || launch_session->virtual_display // User requested virtual display
       || _app.virtual_display            // App is configured to use virtual display
@@ -676,17 +690,21 @@ namespace proc {
       }
     }
 
-    display_device::configure_display(config::video, *launch_session);
+    if (!test_mode) {
+      display_device::configure_display(config::video, *launch_session);
 
-    // We should not preserve display state when using virtual display.
-    // It is already handled by Windows properly.
-    if (this->virtual_display) {
-      display_device::reset_persistence();
+      // We should not preserve display state when using virtual display.
+      // It is already handled by Windows properly.
+      if (this->virtual_display) {
+        display_device::reset_persistence();
+      }
     }
 
 #else
 
-    display_device::configure_display(config::video, *launch_session);
+    if (!test_host::skip("display configuration")) {
+      display_device::configure_display(config::video, *launch_session);
+    }
 
 #endif
 
@@ -1149,7 +1167,7 @@ namespace proc {
 
 #ifdef _WIN32
     // Revert HDR state
-    if (has_run && !mode_changed_display.empty()) {
+    if (has_run && !test_host::enabled() && !mode_changed_display.empty()) {
       auto displayNameW = platf::from_utf8(mode_changed_display);
       if (VDISPLAY::setDisplayHDRByName(displayNameW.c_str(), initial_hdr)) {
         BOOST_LOG(info) << "HDR reverted for display " << mode_changed_display;
@@ -1161,7 +1179,9 @@ namespace proc {
     // Before anything is removed on purpose, or the monitor would put it straight back.
     VDISPLAY::recovery::stop();
 
-    bool used_virtual_display = vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK && _launch_session && _launch_session->virtual_display;
+    // Test host mode created no virtual display and changed no display setting: nothing to remove or revert.
+    const bool test_mode = has_run && test_host::skip("virtual display removal and display revert");
+    bool used_virtual_display = !test_mode && vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK && _launch_session && _launch_session->virtual_display;
     if (used_virtual_display) {
       // Remove every display we created, not just the first: a failure partway through
       // would otherwise leave orphaned monitors attached to the host desktop, and nothing
@@ -1180,7 +1200,9 @@ namespace proc {
     // Only show the Stopped notification if we actually have an app to stop
     // Since terminate() is always run when a new app has started
     if (proc::proc.get_last_run_app_name().length() > 0 && has_run) {
-      if (used_virtual_display) {
+      if (test_mode) {
+        // nothing was changed
+      } else if (used_virtual_display) {
         display_device::reset_persistence();
       } else {
         display_device::revert_configuration();
@@ -2140,7 +2162,7 @@ namespace proc {
 
   #ifdef _WIN32
     size_t fail_count = 0;
-    while (fail_count < 5 && vDisplayDriverStatus != VDISPLAY::DRIVER_STATUS::OK) {
+    while (!test_host::enabled() && fail_count < 5 && vDisplayDriverStatus != VDISPLAY::DRIVER_STATUS::OK) {
       initVDisplayDriver();
       if (vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK) {
         break;

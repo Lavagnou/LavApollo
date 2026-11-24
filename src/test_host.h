@@ -32,4 +32,12 @@ namespace test_host {
    * logged per file and failure (a later success re-arms it). A directory that disappears is recreated.
    */
   void log(std::string_view stream, const nlohmann::json &event);
+
+  /**
+   * @brief Guard for a code path that touches the real system (display driver, GPU profiles, Windows tweaks).
+   *
+   * In test mode: logs one `test host: skipping <what>` line and returns true, the caller takes its safe
+   * early-out. Otherwise returns false and does nothing.
+   */
+  bool skip(std::string_view what);
 }  // namespace test_host

@@ -46,6 +46,7 @@ extern "C" {
 #endif
 #include "sync.h"
 #include "system_tray.h"
+#include "test_host.h"
 #include "thread_safe.h"
 #include "utility.h"
 #include "uuid.h"
@@ -2551,7 +2552,11 @@ namespace stream {
           .capture_mode = config::video.capture,
           .auto_virtual_framegen_limiter = framegen_active || vrr_active,
         });
-        platf::frame_limiter_streaming_start(platf::frame_limiter_owner::rtsp, policy);
+        // Test host mode never starts the limiter (NVIDIA profile, RTSS); the stop below is then
+        // a no-op, since the rtsp owner was never registered.
+        if (!test_host::skip("frame limiter")) {
+          platf::frame_limiter_streaming_start(platf::frame_limiter_owner::rtsp, policy);
+        }
       }
 
       // The first session that asks holds the virtual microphone until it ends

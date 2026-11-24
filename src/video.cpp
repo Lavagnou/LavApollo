@@ -31,6 +31,7 @@ extern "C" {
 #include "pyrowave_host.h"
 #include "pyrowave_protocol.h"
 #include "sync.h"
+#include "test_host.h"
 #include "video.h"
 
 #ifdef _WIN32
@@ -49,6 +50,11 @@ namespace video {
    * @return True if there should be no issues with the probing, false if we should prevent it.
    */
   bool allow_encoder_probing() {
+    // Test host mode: software encoder, synthetic capture, no display to wait for or create.
+    if (test_host::skip("display check before encoder probing")) {
+      return true;
+    }
+
     const auto devices {display_device::enumerate_devices()};
 
     // // If there are no devices, then either the API is not working correctly or OS does not support the lib.

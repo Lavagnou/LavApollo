@@ -33,6 +33,7 @@ typedef enum _D3DKMT_GPU_PREFERENCE_QUERY_STATE: DWORD {
 #include "src/display_device.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/test_host.h"
 #include "src/video.h"
 
 namespace platf {
@@ -221,9 +222,14 @@ namespace platf::dxgi {
     // capture, best case is that capture stops until it powers back on. However,
     // worst case it will trigger us to reinit DD, waking the display back up in
     // a neverending cycle of waking and sleeping the display of an idle machine.
-    SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED);
-    auto clear_display_required = util::fail_guard([]() {
-      SetThreadExecutionState(ES_CONTINUOUS);
+    const bool keep_display_awake = !test_host::skip("display-required execution state");
+    if (keep_display_awake) {
+      SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED);
+    }
+    auto clear_display_required = util::fail_guard([keep_display_awake]() {
+      if (keep_display_awake) {
+        SetThreadExecutionState(ES_CONTINUOUS);
+      }
     });
 
     sleep_overshoot_logger.reset();
@@ -531,7 +537,9 @@ namespace platf::dxgi {
 
       // If we made it here without finding an output, try to power on the display and retry.
       if (tries == 0) {
-        SetThreadExecutionState(ES_DISPLAY_REQUIRED);
+        if (!test_host::skip("display wake-up")) {
+          SetThreadExecutionState(ES_DISPLAY_REQUIRED);
+        }
         Sleep(500);
       }
     }

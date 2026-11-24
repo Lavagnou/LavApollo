@@ -24,6 +24,7 @@
 #include "process.h"
 #include "session_history.h"
 #include "system_tray.h"
+#include "test_host.h"
 #include "updater.h"
 #include "upnp.h"
 #include "uuid.h"
@@ -209,14 +210,23 @@ int main(int argc, char *argv[]) {
   // Adding guard here first as it also performs recovery after crash,
   // otherwise people could theoretically end up without display output.
   // It also should be destroyed before forced shutdown to expedite the cleanup.
-  auto display_device_deinit_guard = display_device::init(platf::appdata() / "display_device.state", config::video);
-  if (!display_device_deinit_guard) {
-    BOOST_LOG(error) << "Display device session failed to initialize"sv;
+  // Test host mode leaves the real displays alone: no init, no crash recovery of a saved state.
+  // Every later display_device call is a no-op while its session is not initialized.
+  std::unique_ptr<platf::deinit_t> display_device_deinit_guard;
+  if (!test_host::skip("display device session")) {
+    display_device_deinit_guard = display_device::init(platf::appdata() / "display_device.state", config::video);
+    if (!display_device_deinit_guard) {
+      BOOST_LOG(error) << "Display device session failed to initialize"sv;
+    }
   }
 
 #ifdef _WIN32
+  // Test host mode never touches the NVIDIA driver profiles or RTSS (the real LavApollo owns them);
+  // the shutdown restore below only acts when an undo file was taken over, so it stays inert.
+  const bool test_mode = test_host::skip("NVIDIA control panel and RTSS profiles");
+
   // Modify relevant NVIDIA control panel settings if the system has corresponding gpu
-  if (nvprefs_instance.load()) {
+  if (!test_mode && nvprefs_instance.load()) {
     // Restore global settings to the undo file left by improper termination of sunshine.exe
     nvprefs_instance.restore_from_and_delete_undo_file_if_exists();
     // Modify application settings for sunshine.exe
@@ -229,8 +239,10 @@ int main(int argc, char *argv[]) {
 
   // Undo frame-limiter overrides a crashed or killed previous run left in the NVIDIA driver
   // profile and in RTSS. After nvprefs, never alongside it: both open driver-settings sessions.
-  platf::frame_limiter_nvcp::restore_pending_overrides();
-  platf::rtss_restore_pending_overrides();
+  if (!test_mode) {
+    platf::frame_limiter_nvcp::restore_pending_overrides();
+    platf::rtss_restore_pending_overrides();
+  }
 
   // Wait as long as possible to terminate Sunshine.exe during logoff/shutdown
   SetProcessShutdownParameters(0x100, SHUTDOWN_NORETRY);
@@ -377,7 +389,10 @@ int main(int argc, char *argv[]) {
 #ifdef _WIN32
     bool allow_probing = video::allow_encoder_probing();
     // Create a temporary virtual display for encoder capability probing
-    if (proc::vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK) {
+    // (never in test host mode: the driver is not opened, so the status is not OK; say so once)
+    if (test_host::skip("temporary virtual display for encoder probing")) {
+      // the software encoder needs no display
+    } else if (proc::vDisplayDriverStatus == VDISPLAY::DRIVER_STATUS::OK) {
       std::string probe_uuid_str = PROBE_DISPLAY_UUID;
       auto probe_uuid = uuid_util::uuid_t::parse(probe_uuid_str);
       auto* probe_guid = (GUID*)(void*)&probe_uuid;

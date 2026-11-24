@@ -197,3 +197,14 @@ TEST_F(TestHost, ForcedConfigValues) {
   EXPECT_EQ(config::video.encoder, "software");
   EXPECT_EQ(config::video.capture, "synthetic");
 }
+
+TEST_F(TestHost, SkipIsTrueOnlyInTestMode) {
+  // Outside test mode: false, and the caller goes on to do the real thing.
+  EXPECT_FALSE(test_host::enabled());
+  EXPECT_FALSE(test_host::skip("virtual display driver"));
+
+  parse("test_host = enabled\n");
+  EXPECT_TRUE(test_host::enabled());
+  EXPECT_TRUE(test_host::skip("virtual display driver"));
+  EXPECT_TRUE(test_host::skip("virtual display driver"));  // every call, not only the first
+}
