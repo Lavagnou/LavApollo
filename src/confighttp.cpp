@@ -46,6 +46,7 @@
 #include "video.h"
 #include "session_history.h"
 #include "stream.h"
+#include "test_host.h"
 #include "utility.h"
 #include "updater.h"
 #include "uuid.h"
@@ -2794,6 +2795,49 @@ namespace confighttp {
   /**
    * @brief Start the HTTPS server.
    */
+  bool test_pin_route_enabled() {
+    return test_host::enabled();
+  }
+
+  bool test_pin_address_allowed(const std::string &address) {
+    return address == "127.0.0.1";
+  }
+
+  /**
+   * @brief Test host mode: give the host the PIN a client shows, as the web UI would (`POST /api/test/pin`).
+   *
+   * No authentication (the testbench orchestrator has no web UI login), so it exists only in test host
+   * mode (see `start()`) and answers 403 to any address but 127.0.0.1, even there.
+   *
+   * @api_examples{/api/test/pin| POST| {"pin":"1234","name":"Test client"}}
+   */
+  void savePinTest(resp_https_t response, req_https_t request) {
+    auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    if (!test_pin_address_allowed(address)) {
+      BOOST_LOG(warning) << "Test host: PIN route refused for ["sv << address << ']';
+      nlohmann::json tree;
+      tree["status"] = false;
+      tree["error"] = "Forbidden";
+      response->write(SimpleWeb::StatusCode::client_error_forbidden, tree.dump(), SimpleWeb::CaseInsensitiveMultimap {{"Content-Type", "application/json"}});
+      return;
+    }
+    if (!validateContentType(response, request, "application/json")) {
+      return;
+    }
+
+    try {
+      std::stringstream ss;
+      ss << request->content.rdbuf();
+      nlohmann::json input_tree = nlohmann::json::parse(ss.str());
+      nlohmann::json output_tree;
+      output_tree["status"] = nvhttp::pin(input_tree.value("pin", ""), input_tree.value("name", ""));
+      send_response(response, output_tree);
+    } catch (std::exception &e) {
+      BOOST_LOG(warning) << "SavePinTest: "sv << e.what();
+      bad_request(response, request, e.what());
+    }
+  }
+
   void start() {
     auto shutdown_event = mail::man->event<bool>(mail::shutdown);
     auto port_https = net::map_port(PORT_HTTPS);
@@ -2844,6 +2888,9 @@ namespace confighttp {
     server.resource["^/api/history/sessions/([A-Fa-f0-9-]+)$"]["GET"] = getSessionHistoryDetail;
     server.resource["^/api/history/sessions/([A-Fa-f0-9-]+)$"]["DELETE"] = deleteSessionHistory;
     server.resource["^/api/pin$"]["POST"] = savePin;
+    if (test_pin_route_enabled()) {
+      server.resource["^/api/test/pin$"]["POST"] = savePinTest;
+    }
     server.resource["^/api/otp$"]["POST"] = getOTP;
     server.resource["^/api/apps$"]["GET"] = getApps;
     server.resource["^/api/apps$"]["POST"] = saveApp;

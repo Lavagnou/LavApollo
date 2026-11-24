@@ -196,6 +196,16 @@ namespace nvhttp {
    */
   bool pin(std::string pin, std::string name);
 
+  /**
+   * @brief Test host mode: mark a `serverinfo` answer and apply the fixture's fake identity.
+   * @param tree The answer being built (root node `root`).
+   *
+   * No-op outside test host mode. Adds `LavTestHost` (and `LavTestHostThisPc` if the fixture allows
+   * streaming to this PC), replaces `appversion` with `test_host_appversion` if set, and replaces `mac`
+   * with `test_host_mac` if set -- only when the answer already carries a MAC (paired HTTPS requests).
+   */
+  void apply_test_host_serverinfo(boost::property_tree::ptree &tree);
+
   std::string request_otp(const std::string& passphrase, const std::string& deviceName);
 
   /**

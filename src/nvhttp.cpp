@@ -1002,6 +1002,26 @@ namespace nvhttp {
     }
   }
 
+  void apply_test_host_serverinfo(pt::ptree &tree) {
+    if (!test_host::enabled()) {
+      return;
+    }
+
+    // The client test build recognises a test host by this mark and refuses every other server.
+    tree.put("root.LavTestHost", 1);
+    if (config::sunshine.test_host_this_pc) {
+      // Lets one fixture lift the client's "this PC" exemption, to test that refusal.
+      tree.put("root.LavTestHostThisPc", 1);
+    }
+    if (!config::sunshine.test_host_appversion.empty()) {
+      tree.put("root.appversion", config::sunshine.test_host_appversion);
+    }
+    // Only where a MAC was already answered: the plain HTTP answer carries none.
+    if (!config::sunshine.test_host_mac.empty() && tree.get_optional<std::string>("root.mac")) {
+      tree.put("root.mac", config::sunshine.test_host_mac);
+    }
+  }
+
   bool pin(std::string pin, std::string name) {
     pt::ptree tree;
     if (map_id_sess.empty()) {
@@ -1201,6 +1221,8 @@ namespace nvhttp {
     }
 
     tree.put("root.ServerCodecModeSupport", server_codec_mode_support());
+
+    apply_test_host_serverinfo(tree);
 
     tree.put("root.PairStatus", pair_status);
 

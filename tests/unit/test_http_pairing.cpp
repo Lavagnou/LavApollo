@@ -5,6 +5,7 @@
 
 #include "../tests_common.h"
 
+#include <src/confighttp.h>
 #include <src/nvhttp.h>
 
 using namespace nvhttp;
@@ -255,4 +256,97 @@ TEST(PairingTest, OutOfOrderCalls) {
   // Calling it again should fail
   getservercert(sess, tree, "test");
   ASSERT_FALSE(tree.get<int>("root.paired") == 1);
+}
+
+namespace {
+  /// Test host mode on for the scope, with the fixture-set fields restored afterwards.
+  struct TestHostConfigScope {
+    TestHostConfigScope(bool on):
+        saved_on {config::sunshine.test_host},
+        saved_mac {config::sunshine.test_host_mac},
+        saved_version {config::sunshine.test_host_appversion},
+        saved_this_pc {config::sunshine.test_host_this_pc} {
+      config::sunshine.test_host = on;
+    }
+
+    ~TestHostConfigScope() {
+      config::sunshine.test_host = saved_on;
+      config::sunshine.test_host_mac = saved_mac;
+      config::sunshine.test_host_appversion = saved_version;
+      config::sunshine.test_host_this_pc = saved_this_pc;
+    }
+
+    bool saved_on;
+    std::string saved_mac;
+    std::string saved_version;
+    bool saved_this_pc;
+  };
+}  // namespace
+
+TEST(HttpPairing, TestHostServerinfoMarks) {
+  {
+    // Outside test mode serverinfo is untouched, even if the fixture fields are set.
+    TestHostConfigScope scope {false};
+    config::sunshine.test_host_mac = "02:00:00:00:00:01";
+    config::sunshine.test_host_appversion = "1.0.0.0";
+    config::sunshine.test_host_this_pc = true;
+    boost::property_tree::ptree tree;
+    tree.put("root.appversion", "real");
+    tree.put("root.mac", "real-mac");
+    nvhttp::apply_test_host_serverinfo(tree);
+    EXPECT_FALSE(tree.get_optional<std::string>("root.LavTestHost"));
+    EXPECT_FALSE(tree.get_optional<std::string>("root.LavTestHostThisPc"));
+    EXPECT_EQ(tree.get<std::string>("root.appversion"), "real");
+    EXPECT_EQ(tree.get<std::string>("root.mac"), "real-mac");
+  }
+  {
+    TestHostConfigScope scope {true};
+    config::sunshine.test_host_mac.clear();
+    config::sunshine.test_host_appversion.clear();
+    config::sunshine.test_host_this_pc = false;
+    boost::property_tree::ptree tree;
+    tree.put("root.appversion", "real");
+    tree.put("root.mac", "real-mac");
+    nvhttp::apply_test_host_serverinfo(tree);
+    EXPECT_EQ(tree.get<std::string>("root.LavTestHost"), "1");
+    EXPECT_FALSE(tree.get_optional<std::string>("root.LavTestHostThisPc"));
+    EXPECT_EQ(tree.get<std::string>("root.appversion"), "real");
+    EXPECT_EQ(tree.get<std::string>("root.mac"), "real-mac");
+  }
+  {
+    TestHostConfigScope scope {true};
+    config::sunshine.test_host_mac = "02:00:00:00:00:01";
+    config::sunshine.test_host_appversion = "1.0.0.0";
+    config::sunshine.test_host_this_pc = true;
+    boost::property_tree::ptree tree;
+    tree.put("root.appversion", "real");
+    tree.put("root.mac", "real-mac");
+    nvhttp::apply_test_host_serverinfo(tree);
+    EXPECT_EQ(tree.get<std::string>("root.LavTestHost"), "1");
+    EXPECT_EQ(tree.get<std::string>("root.LavTestHostThisPc"), "1");
+    EXPECT_EQ(tree.get<std::string>("root.appversion"), "1.0.0.0");
+    EXPECT_EQ(tree.get<std::string>("root.mac"), "02:00:00:00:00:01");
+
+    // The plain HTTP answer carries no MAC (a placeholder is added elsewhere): none appears here.
+    boost::property_tree::ptree http_tree;
+    http_tree.put("root.appversion", "real");
+    nvhttp::apply_test_host_serverinfo(http_tree);
+    EXPECT_FALSE(http_tree.get_optional<std::string>("root.mac"));
+  }
+}
+
+TEST(HttpPairing, TestPinRouteOnlyInTestHostMode) {
+  {
+    TestHostConfigScope scope {false};
+    EXPECT_FALSE(confighttp::test_pin_route_enabled());
+  }
+  {
+    TestHostConfigScope scope {true};
+    EXPECT_TRUE(confighttp::test_pin_route_enabled());
+  }
+  // Even in test mode, only the loopback address may use it.
+  EXPECT_TRUE(confighttp::test_pin_address_allowed("127.0.0.1"));
+  EXPECT_FALSE(confighttp::test_pin_address_allowed("192.168.1.20"));
+  EXPECT_FALSE(confighttp::test_pin_address_allowed("::1"));
+  EXPECT_FALSE(confighttp::test_pin_address_allowed(""));
 }

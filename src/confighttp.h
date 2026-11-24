@@ -19,6 +19,16 @@ using namespace std::chrono_literals;
 namespace confighttp {
   constexpr auto PORT_HTTPS = 1;
   void start();
+
+  /**
+   * @brief Whether the unauthenticated `POST /api/test/pin` route exists: test host mode only.
+   */
+  bool test_pin_route_enabled();
+
+  /**
+   * @brief Whether a request from this (normalized) address may use `POST /api/test/pin`: 127.0.0.1 only.
+   */
+  bool test_pin_address_allowed(const std::string &address);
 }  // namespace confighttp
 
 // mime types map
