@@ -23,6 +23,7 @@
 #include "src/globals.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/test_host.h"
 
 #ifdef __MINGW32__
 // DECLARE_HANDLE(HSYNTHETICPOINTERDEVICE);
@@ -538,6 +539,12 @@ namespace platf {
     input_t result {new input_raw_t {}};
     auto &raw = *(input_raw_t *) result.get();
 
+    // Test host mode: no VHF probe, no ViGEm, no synthetic pointer devices. Every pointer in `raw` stays
+    // null, which the rest of this file already treats as "no gamepad / no touch support".
+    if (test_host::enabled()) {
+      return result;
+    }
+
     // Probe the VHF driver first: it decides how loudly a missing ViGEmBus is reported.
     raw.vhf = new vhf_gamepad_t {};
     const bool vhf_available = raw.vhf->probe();
@@ -597,6 +604,10 @@ namespace platf {
   }
 
   void abs_mouse(input_t &input, const touch_port_t &touch_port, float x, float y) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "mouse_abs"}, {"x", x}, {"y", y}, {"width", touch_port.width}, {"height", touch_port.height}, {"offset_x", touch_port.offset_x}, {"offset_y", touch_port.offset_y}});
+      return;
+    }
     INPUT i {};
 
     i.type = INPUT_MOUSE;
@@ -619,6 +630,10 @@ namespace platf {
   }
 
   void move_mouse(input_t &input, int deltaX, int deltaY) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "mouse_move"}, {"dx", deltaX}, {"dy", deltaY}});
+      return;
+    }
     INPUT i {};
 
     i.type = INPUT_MOUSE;
@@ -646,6 +661,10 @@ namespace platf {
   }
 
   void button_mouse(input_t &input, int button, bool release) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "mouse_button"}, {"button", button}, {"down", !release}});
+      return;
+    }
     INPUT i {};
 
     i.type = INPUT_MOUSE;
@@ -669,6 +688,10 @@ namespace platf {
   }
 
   void scroll(input_t &input, int distance) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "scroll"}, {"distance", distance}});
+      return;
+    }
     INPUT i {};
 
     i.type = INPUT_MOUSE;
@@ -681,6 +704,10 @@ namespace platf {
   }
 
   void hscroll(input_t &input, int distance) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "hscroll"}, {"distance", distance}});
+      return;
+    }
     INPUT i {};
 
     i.type = INPUT_MOUSE;
@@ -693,6 +720,10 @@ namespace platf {
   }
 
   void keyboard_update(input_t &input, uint16_t modcode, bool release, uint8_t flags) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "key"}, {"vk", modcode}, {"down", !release}});
+      return;
+    }
     INPUT i {};
     i.type = INPUT_KEYBOARD;
     auto &ki = i.ki;
@@ -993,6 +1024,10 @@ namespace platf {
    * @param touch The touch event.
    */
   void touch_update(client_input_t *input, const touch_port_t &touch_port, const touch_input_t &touch) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "touch"}, {"event", touch.eventType}, {"pointer_id", touch.pointerId}, {"x", touch.x}, {"y", touch.y}, {"pressure", touch.pressureOrDistance}, {"area_major", touch.contactAreaMajor}, {"area_minor", touch.contactAreaMinor}, {"rotation", touch.rotation}});
+      return;
+    }
     auto raw = (client_input_raw_t *) input;
 
     // Bail if we're not running on an OS that supports virtual touch input
@@ -1119,6 +1154,10 @@ namespace platf {
    * @param pen The pen event.
    */
   void pen_update(client_input_t *input, const touch_port_t &touch_port, const pen_input_t &pen) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "pen"}, {"event", pen.eventType}, {"tool", pen.toolType}, {"buttons", pen.penButtons}, {"tilt", pen.tilt}, {"rotation", pen.rotation}, {"x", pen.x}, {"y", pen.y}, {"pressure", pen.pressureOrDistance}, {"area_major", pen.contactAreaMajor}, {"area_minor", pen.contactAreaMinor}});
+      return;
+    }
     auto raw = (client_input_raw_t *) input;
 
     // Bail if we're not running on an OS that supports virtual pen input
@@ -1232,6 +1271,10 @@ namespace platf {
   }
 
   void unicode(input_t &input, char *utf8, int size) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "unicode"}, {"text", std::string(utf8, size)}});
+      return;
+    }
     // We can do no worse than one UTF-16 character per byte of UTF-8
     WCHAR wide[size];
 
@@ -1260,6 +1303,10 @@ namespace platf {
   }
 
   int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &metadata, feedback_queue_t feedback_queue) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "gamepad_alloc"}, {"index", id.globalIndex}, {"client_index", id.clientRelativeIndex}, {"gamepad_type", metadata.type}, {"capabilities", metadata.capabilities}, {"supported_buttons", metadata.supportedButtons}});
+      return 0;
+    }
     auto raw = (input_raw_t *) input.get();
 
     // VHF when the user picked one of its controllers, or automatically when ViGEmBus is missing
@@ -1336,6 +1383,10 @@ namespace platf {
   }
 
   void free_gamepad(input_t &input, int nr) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "gamepad_free"}, {"index", nr}});
+      return;
+    }
     auto raw = (input_raw_t *) input.get();
 
     if (vhf_owns_gamepad(raw, nr)) {
@@ -1605,6 +1656,10 @@ namespace platf {
    * @param gamepad_state The gamepad button/axis state sent from the client.
    */
   void gamepad_update(input_t &input, int nr, const gamepad_state_t &gamepad_state) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "gamepad"}, {"index", nr}, {"buttons", gamepad_state.buttonFlags}, {"lt", gamepad_state.lt}, {"rt", gamepad_state.rt}, {"ls_x", gamepad_state.lsX}, {"ls_y", gamepad_state.lsY}, {"rs_x", gamepad_state.rsX}, {"rs_y", gamepad_state.rsY}});
+      return;
+    }
     if (auto raw = (input_raw_t *) input.get(); vhf_owns_gamepad(raw, nr)) {
       raw->vhf->update(nr, gamepad_state);
       return;
@@ -1641,6 +1696,10 @@ namespace platf {
    * @param touch The touch event.
    */
   void gamepad_touch(input_t &input, const gamepad_touch_t &touch) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "gamepad_touch"}, {"index", touch.id.globalIndex}, {"event", touch.eventType}, {"pointer_id", touch.pointerId}, {"x", touch.x}, {"y", touch.y}, {"pressure", touch.pressure}});
+      return;
+    }
     if (auto raw = (input_raw_t *) input.get(); vhf_owns_gamepad(raw, touch.id.globalIndex)) {
       raw->vhf->touch(touch.id.globalIndex, touch);
       return;
@@ -1751,6 +1810,10 @@ namespace platf {
    * @param motion The motion event.
    */
   void gamepad_motion(input_t &input, const gamepad_motion_t &motion) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "gamepad_motion"}, {"index", motion.id.globalIndex}, {"motion_type", motion.motionType}, {"x", motion.x}, {"y", motion.y}, {"z", motion.z}});
+      return;
+    }
     if (auto raw = (input_raw_t *) input.get(); vhf_owns_gamepad(raw, motion.id.globalIndex)) {
       raw->vhf->motion(motion.id.globalIndex, motion);
       return;
@@ -1782,6 +1845,10 @@ namespace platf {
    * @param battery The battery event.
    */
   void gamepad_battery(input_t &input, const gamepad_battery_t &battery) {
+    if (test_host::enabled()) {
+      test_host::log("input", {{"type", "gamepad_battery"}, {"index", battery.id.globalIndex}, {"state", battery.state}, {"percentage", battery.percentage}});
+      return;
+    }
     if (auto raw = (input_raw_t *) input.get(); vhf_owns_gamepad(raw, battery.id.globalIndex)) {
       raw->vhf->battery(battery.id.globalIndex, battery);
       return;

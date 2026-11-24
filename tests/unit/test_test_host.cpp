@@ -260,3 +260,121 @@ TEST_F(TestHost, ClipboardIsKeptInMemoryAndLogged) {
   ASSERT_EQ(lines.size(), 1u);
   EXPECT_EQ(lines[0]["clipboard_set"], "hello");
 }
+
+// Input tests: test mode is switched on before any platf input call, so nothing below
+// can reach Windows (SendInput, ViGEm, VHF, synthetic pointer devices).
+TEST_F(TestHost, KeyboardIsLoggedNotInjected) {
+  parse("test_host = enabled\n");
+  auto input = platf::input();
+  platf::keyboard_update(input, 0xC0, false, 0);  // VK_OEM_3, the voice push-to-talk key
+  platf::keyboard_update(input, 0xC0, true, 0);
+
+  auto lines = read_lines(test_host::dir() / "input.jsonl");
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_EQ(lines[0]["type"], "key");
+  EXPECT_EQ(lines[0]["vk"], 192);
+  EXPECT_EQ(lines[0]["down"], true);
+  EXPECT_TRUE(lines[0].contains("t"));
+  EXPECT_EQ(lines[1]["down"], false);
+}
+
+TEST_F(TestHost, MouseScrollAndTextAreLogged) {
+  parse("test_host = enabled\n");
+  auto input = platf::input();
+  platf::touch_port_t port {};
+  port.width = 1920;
+  port.height = 1080;
+  platf::move_mouse(input, 5, -7);
+  platf::abs_mouse(input, port, 10.5f, 20.5f);
+  platf::button_mouse(input, 3, false);
+  platf::button_mouse(input, 3, true);
+  platf::scroll(input, 120);
+  platf::hscroll(input, -120);
+  char text[] = "h\xC3\xA9";
+  platf::unicode(input, text, 3);
+
+  auto lines = read_lines(test_host::dir() / "input.jsonl");
+  ASSERT_EQ(lines.size(), 7u);
+  EXPECT_EQ(lines[0], (nlohmann::json {{"type", "mouse_move"}, {"dx", 5}, {"dy", -7}, {"t", lines[0]["t"]}}));
+  EXPECT_EQ(lines[1]["type"], "mouse_abs");
+  EXPECT_FLOAT_EQ(lines[1]["x"].get<float>(), 10.5f);
+  EXPECT_EQ(lines[1]["width"], 1920);
+  EXPECT_EQ(lines[2]["type"], "mouse_button");
+  EXPECT_EQ(lines[2]["button"], 3);
+  EXPECT_EQ(lines[2]["down"], true);
+  EXPECT_EQ(lines[3]["down"], false);
+  EXPECT_EQ(lines[4]["type"], "scroll");
+  EXPECT_EQ(lines[4]["distance"], 120);
+  EXPECT_EQ(lines[5]["type"], "hscroll");
+  EXPECT_EQ(lines[5]["distance"], -120);
+  EXPECT_EQ(lines[6]["type"], "unicode");
+  EXPECT_EQ(lines[6]["text"], "h\xC3\xA9");
+}
+
+TEST_F(TestHost, TouchAndPenAreLoggedWithoutAPointerDevice) {
+  parse("test_host = enabled\n");
+  auto input = platf::input();
+  auto client = platf::allocate_client_input_context(input);
+  platf::touch_port_t port {};
+  port.width = 1920;
+  port.height = 1080;
+  platf::touch_input_t touch {};
+  touch.eventType = LI_TOUCH_EVENT_DOWN;
+  touch.pointerId = 4;
+  touch.x = 0.25f;
+  touch.y = 0.5f;
+  platf::touch_update(client.get(), port, touch);
+  platf::pen_input_t pen {};
+  pen.eventType = LI_TOUCH_EVENT_MOVE;
+  pen.penButtons = 1;
+  pen.x = 0.75f;
+  platf::pen_update(client.get(), port, pen);
+
+  auto lines = read_lines(test_host::dir() / "input.jsonl");
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_EQ(lines[0]["type"], "touch");
+  EXPECT_EQ(lines[0]["event"], LI_TOUCH_EVENT_DOWN);
+  EXPECT_EQ(lines[0]["pointer_id"], 4);
+  EXPECT_FLOAT_EQ(lines[0]["x"].get<float>(), 0.25f);
+  EXPECT_EQ(lines[1]["type"], "pen");
+  EXPECT_EQ(lines[1]["buttons"], 1);
+}
+
+TEST_F(TestHost, GamepadIsLoggedWithoutAVirtualController) {
+  parse("test_host = enabled\n");
+  auto input = platf::input();
+  platf::gamepad_id_t id {2, 1};
+  platf::gamepad_arrival_t arrival {};
+  arrival.type = LI_CTYPE_XBOX;
+  arrival.capabilities = LI_CCAP_RUMBLE;
+  EXPECT_EQ(platf::alloc_gamepad(input, id, arrival, {}), 0);
+
+  platf::gamepad_state_t state {};
+  state.buttonFlags = 0x1000;
+  state.lt = 200;
+  state.lsX = -1234;
+  platf::gamepad_update(input, 2, state);
+  platf::gamepad_touch_t touch {id, LI_TOUCH_EVENT_DOWN, 3, 0.5f, 0.5f, 1.0f};
+  platf::gamepad_touch(input, touch);
+  platf::gamepad_motion_t motion {id, LI_MOTION_TYPE_GYRO, 1.0f, 2.0f, 3.0f};
+  platf::gamepad_motion(input, motion);
+  platf::gamepad_battery_t battery {id, LI_BATTERY_STATE_CHARGING, 80};
+  platf::gamepad_battery(input, battery);
+  platf::free_gamepad(input, 2);
+
+  auto lines = read_lines(test_host::dir() / "input.jsonl");
+  ASSERT_EQ(lines.size(), 6u);
+  EXPECT_EQ(lines[0]["type"], "gamepad_alloc");
+  EXPECT_EQ(lines[0]["index"], 2);
+  EXPECT_EQ(lines[0]["client_index"], 1);
+  EXPECT_EQ(lines[1]["type"], "gamepad");
+  EXPECT_EQ(lines[1]["buttons"], 0x1000);
+  EXPECT_EQ(lines[1]["lt"], 200);
+  EXPECT_EQ(lines[1]["ls_x"], -1234);
+  EXPECT_EQ(lines[2]["type"], "gamepad_touch");
+  EXPECT_EQ(lines[3]["type"], "gamepad_motion");
+  EXPECT_FLOAT_EQ(lines[3]["z"].get<float>(), 3.0f);
+  EXPECT_EQ(lines[4]["type"], "gamepad_battery");
+  EXPECT_EQ(lines[4]["percentage"], 80);
+  EXPECT_EQ(lines[5]["type"], "gamepad_free");
+}
