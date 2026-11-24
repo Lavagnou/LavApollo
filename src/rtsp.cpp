@@ -419,7 +419,12 @@ namespace rtsp_stream {
         return -1;
       }
 
-      acceptor.bind(tcp::endpoint(af == net::IPV4 ? tcp::v4() : tcp::v6(), port), ec);
+      auto bind_addr = boost::asio::ip::make_address(net::bind_address_string(af), ec);
+      if (ec) {
+        return -1;
+      }
+
+      acceptor.bind(tcp::endpoint(bind_addr, port), ec);
       if (ec) {
         return -1;
       }

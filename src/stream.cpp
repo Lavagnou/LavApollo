@@ -2131,7 +2131,7 @@ namespace stream {
       BOOST_LOG(error) << "Failed to set video socket send buffer size (SO_SENDBUF)";
     }
 
-    ctx.video_sock.bind(udp::endpoint(protocol, video_port), ec);
+    ctx.video_sock.bind(udp::endpoint(boost::asio::ip::make_address(net::bind_address_string(address_family)), video_port), ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Video server to port ["sv << video_port << "]: "sv << ec.message();
 
@@ -2153,7 +2153,7 @@ namespace stream {
       BOOST_LOG(error) << "Failed to set audio socket send buffer size (SO_SENDBUF)";
     }
 
-    ctx.audio_sock.bind(udp::endpoint(protocol, audio_port), ec);
+    ctx.audio_sock.bind(udp::endpoint(boost::asio::ip::make_address(net::bind_address_string(address_family)), audio_port), ec);
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Audio server to port ["sv << audio_port << "]: "sv << ec.message();
 

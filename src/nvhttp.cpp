@@ -2167,7 +2167,7 @@ namespace nvhttp {
 #else
     https_server.config.reuse_address = true;
 #endif
-    https_server.config.address = net::af_to_any_address_string(address_family);
+    https_server.config.address = net::bind_address_string(address_family);
     https_server.config.port = port_https;
 
     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
@@ -2182,7 +2182,7 @@ namespace nvhttp {
 #else
     http_server.config.reuse_address = true;
 #endif
-    http_server.config.address = net::af_to_any_address_string(address_family);
+    http_server.config.address = net::bind_address_string(address_family);
     http_server.config.port = port_http;
 
     auto accept_and_run = [&](auto *http_server, std::uint16_t port, std::string_view role) {

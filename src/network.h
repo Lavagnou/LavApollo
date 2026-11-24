@@ -176,6 +176,14 @@ namespace net {
   std::string_view af_to_any_address_string(af_e af);
 
   /**
+   * @brief Get the address every listening socket binds to.
+   * @details Loopback in test host mode, the wildcard address of the family otherwise.
+   * @param af Address family.
+   * @return Address string.
+   */
+  std::string_view bind_address_string(af_e af);
+
+  /**
    * @brief Convert an address to a normalized form.
    * @details Normalization converts IPv4-mapped IPv6 addresses into IPv4 addresses.
    * @param address The address to normalize.

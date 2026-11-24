@@ -13,6 +13,7 @@
 #include "config.h"
 #include "logging.h"
 #include "network.h"
+#include "test_host.h"
 #include "utility.h"
 
 using namespace std::literals;
@@ -162,7 +163,7 @@ namespace net {
       enet_initialize();
     });
 
-    auto any_addr = net::af_to_any_address_string(af);
+    auto any_addr = net::bind_address_string(af);
     enet_address_set_host(&addr, any_addr.data());
     enet_address_set_port(&addr, port);
 
@@ -269,6 +270,13 @@ namespace net {
     return streaming_binds_failed == 0;
   }
 
+  std::string_view bind_address_string(af_e af) {
+    if (test_host::enabled()) {
+      return "127.0.0.1"sv;
+    }
+    return af_to_any_address_string(af);
+  }
+
   port_validation_t validate_stream_ports() {
     boost::asio::io_context ioc;
     const auto af = af_from_enum_string(config::sunshine.address_family);
@@ -290,7 +298,7 @@ namespace net {
         acc.open(is_v4 ? ip::tcp::v4() : ip::tcp::v6(), ec);
         if (!ec) {
           set_exclusive_bind(acc, ec);
-          if (!ec) acc.bind(ip::tcp::endpoint(is_v4 ? ip::tcp::v4() : ip::tcp::v6(), port), ec);
+          if (!ec) acc.bind(ip::tcp::endpoint(ip::make_address(bind_address_string(af)), port), ec);
           boost::system::error_code ignored;
           acc.close(ignored);
         }
@@ -299,7 +307,7 @@ namespace net {
         sock.open(is_v4 ? ip::udp::v4() : ip::udp::v6(), ec);
         if (!ec) {
           set_exclusive_bind(sock, ec);
-          if (!ec) sock.bind(ip::udp::endpoint(is_v4 ? ip::udp::v4() : ip::udp::v6(), port), ec);
+          if (!ec) sock.bind(ip::udp::endpoint(ip::make_address(bind_address_string(af)), port), ec);
           boost::system::error_code ignored;
           sock.close(ignored);
         }

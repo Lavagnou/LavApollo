@@ -4,6 +4,7 @@
  */
 #include "../tests_common.h"
 
+#include <src/config.h>
 #include <src/network.h>
 
 struct MdnsInstanceNameTest: testing::TestWithParam<std::tuple<std::string, std::string>> {};
@@ -54,4 +55,20 @@ TEST(StreamingBindTests, AbortStopsTheWait) {
     return true;
   }));
   EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
+}
+
+TEST(Network, BindsLoopbackInTestHostMode) {
+  auto saved = config::sunshine.test_host;
+  config::sunshine.test_host = true;
+  EXPECT_EQ(net::bind_address_string(net::IPV4), "127.0.0.1");
+  EXPECT_EQ(net::bind_address_string(net::BOTH), "127.0.0.1");
+  config::sunshine.test_host = saved;
+}
+
+TEST(Network, BindsAnyAddressOtherwise) {
+  auto saved = config::sunshine.test_host;
+  config::sunshine.test_host = false;
+  EXPECT_EQ(net::bind_address_string(net::IPV4), net::af_to_any_address_string(net::IPV4));
+  EXPECT_EQ(net::bind_address_string(net::BOTH), net::af_to_any_address_string(net::BOTH));
+  config::sunshine.test_host = saved;
 }
