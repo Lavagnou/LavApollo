@@ -581,15 +581,18 @@ pas dans l'interface ni dans `docs/configuration.md`. Hors `test_host = enabled`
   seulement** (`address_family = ipv4`, vérifié au `netstat` : 4 ports TCP de l'instance, aucun UDP au repos).
 - **Ce qui est remplacé** : capture `synthetic` (`display_synthetic.cpp`, H.264 logiciel seulement, image
   numérotée : 32 cellules 8×8 en bas à gauche, **repart à 0 à chaque réinitialisation de la capture**, format dans
-  `src/benchmark_scene_formula.h`), tonalité audio synthétique, micro, manettes (ViGEm absent : avertissements
+  `src/benchmark_scene_formula.h` ; **les numéros ne sont pas consécutifs** : un créneau sauté côté hôte laisse un
+  trou, une image en retard saute au créneau courant, un test client ne doit pas attendre n+1), tonalité audio synthétique, micro, manettes (ViGEm absent : avertissements
   `Gamepad … disabled` normaux).
 - **Ce qui est journalisé** dans `<appdata>/testhost/*.jsonl` (`test_host::log`, champ `t` en ms depuis le
   démarrage du processus) : `input.jsonl` (`key`, `mouse_move`, `mouse_abs`, `mouse_button`, `scroll`, `hscroll`,
-  `touch`, `pen`, `unicode`, `gamepad*`), `commands.jsonl` (commandes lancées par `platf::run_command`),
+  `touch`, `pen`, `unicode`, `gamepad*`), `commands.jsonl` (commandes lancées par `platf::run_command` ; en mode test, le remplaçant durable `ping …` ne sert
+  qu'à la commande principale d'une appli (`run_command` avec groupe de processus) ; préparation, annulation,
+  détachées, d'état et de serveur reçoivent un `exit 0` immédiat),
   `events.jsonl` (`clipboard_set`, `playnite_launch`, `playnite_stop`, `playnite_refused`, `mic_frames`).
   Une écriture qui échoue ne lève jamais (un avertissement par fichier).
 - **`serverinfo`** porte `<LavTestHost>1</LavTestHost>` ; `POST /api/test/pin` (port web = base + 1, HTTPS
-  auto-signé, 127.0.0.1, **sans authentification**) `{"pin":"1234","name":"x"}` saisit le PIN comme l'interface
+  auto-signé, 127.0.0.1 seulement : `::1` est refusé, viser l'adresse et non `localhost` ; **sans authentification**) `{"pin":"1234","name":"x"}` saisit le PIN comme l'interface
   web (`{"status":false}` s'il n'y a pas d'appairage en attente).
 - **Chemins** : `LAVAPOLLO_APPDATA` redirige tout le dossier de données (`misc.cpp`) et **`ProgramData` doit
   pointer lui aussi dans le dossier du faux PC** (Playnite et NVIDIA y écrivent ; hors du dossier, les écritures
@@ -604,7 +607,8 @@ $pc = "$env:TEMP\lavtesthost\pc1"; New-Item -ItemType Directory -Force "$pc\pd" 
 #   + file_state, file_apps, credentials_file, log_path en chemins absolus (slashs avant) dans $pc
 # apps.json : {"env":{},"apps":[{"name":"Bureau","cmd":""}]}
 $env:LAVAPOLLO_APPDATA = $pc; $env:ProgramData = "$pc\pd"
-Start-Process build\t\sunshine.exe -ArgumentList "`"$pc\sunshine.conf`"" -WorkingDirectory build\t -WindowStyle Hidden -PassThru
+$repo = "<repo>"   # racine de LavApollo, chemin absolu
+Start-Process "$repouild	\sunshine.exe" -ArgumentList "`"$pc\sunshine.conf`"" -WorkingDirectory "$repouild	" -WindowStyle Hidden -PassThru
 curl.exe -s http://127.0.0.1:40989/serverinfo      # LavTestHost, Test-PC-1
 ```
 
