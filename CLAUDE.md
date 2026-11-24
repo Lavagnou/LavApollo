@@ -561,6 +561,61 @@ contract is `docs/pyrowave-protocol.md`, shared word for word with `LavArtemis-Q
 - `src/pyrowave_policy.{h,cpp}` (framing, FEC plan, budget, pacing) has no Sunshine dependency and is covered by
   `tests/unit/test_pyrowave_policy.cpp`.
 
+## Hôte de test (`test_host`)
+
+LavApollo lancé comme **faux PC isolé** pour les tests automatisés des clients (banc d'essai : de vrais
+clients contre un vrai hôte, sans toucher au système). **Windows seulement**, **interne** : ces clés ne sont
+pas dans l'interface ni dans `docs/configuration.md`. Hors `test_host = enabled`, rien ne change.
+
+| Clé | Effet |
+|---|---|
+| `test_host` | `enabled` active le mode |
+| `test_host_mac` | MAC annoncée par `serverinfo` (remplace aussi le `00:00:00:00:00:00` du PC non apparié) |
+| `test_host_appversion` | `appversion` annoncée (tester « hôte non pris en charge ») |
+| `test_host_this_pc` | ajoute `<LavTestHostThisPc>1</LavTestHostThisPc>` (tester « pas de stream vers soi-même ») |
+| `port`, `sunshine_name` | une instance par port (**base 40989+**, sous 49152) et par nom |
+
+- **Ce qui est coupé** (`test_host::skip("<quoi>")` journalise `test host: skipping <quoi>`, **au moins une
+  ligne par site**, pas exactement une) : écran virtuel / SudoVDA, profils NVIDIA / NVCP / RTSS, réglages
+  Windows, bascule HDR, découverte mDNS, tray, mise à jour auto, UPnP. L'écoute se fait sur **127.0.0.1
+  seulement** (`address_family = ipv4`, vérifié au `netstat` : 4 ports TCP de l'instance, aucun UDP au repos).
+- **Ce qui est remplacé** : capture `synthetic` (`display_synthetic.cpp`, H.264 logiciel seulement, image
+  numérotée : 32 cellules 8×8 en bas à gauche, **repart à 0 à chaque réinitialisation de la capture**, format dans
+  `src/benchmark_scene_formula.h`), tonalité audio synthétique, micro, manettes (ViGEm absent : avertissements
+  `Gamepad … disabled` normaux).
+- **Ce qui est journalisé** dans `<appdata>/testhost/*.jsonl` (`test_host::log`, champ `t` en ms depuis le
+  démarrage du processus) : `input.jsonl` (`key`, `mouse_move`, `mouse_abs`, `mouse_button`, `scroll`, `hscroll`,
+  `touch`, `pen`, `unicode`, `gamepad*`), `commands.jsonl` (commandes lancées par `platf::run_command`),
+  `events.jsonl` (`clipboard_set`, `playnite_launch`, `playnite_stop`, `playnite_refused`, `mic_frames`).
+  Une écriture qui échoue ne lève jamais (un avertissement par fichier).
+- **`serverinfo`** porte `<LavTestHost>1</LavTestHost>` ; `POST /api/test/pin` (port web = base + 1, HTTPS
+  auto-signé, 127.0.0.1, **sans authentification**) `{"pin":"1234","name":"x"}` saisit le PIN comme l'interface
+  web (`{"status":false}` s'il n'y a pas d'appairage en attente).
+- **Chemins** : `LAVAPOLLO_APPDATA` redirige tout le dossier de données (`misc.cpp`) et **`ProgramData` doit
+  pointer lui aussi dans le dossier du faux PC** (Playnite et NVIDIA y écrivent ; hors du dossier, les écritures
+  Playnite sont refusées). Ne jamais viser `C:\ProgramData\LavApollo` ni le service réel.
+
+Lancer une instance à la main (PowerShell, depuis un dossier temporaire ; **chemins absolus dans
+`sunshine.conf`**, sinon `file_state` & co. tombent dans `build\t\config`) :
+
+```powershell
+$pc = "$env:TEMP\lavtesthost\pc1"; New-Item -ItemType Directory -Force "$pc\pd" | Out-Null
+# sunshine.conf : test_host = enabled / port = 40989 / sunshine_name = Test-PC-1
+#   + file_state, file_apps, credentials_file, log_path en chemins absolus (slashs avant) dans $pc
+# apps.json : {"env":{},"apps":[{"name":"Bureau","cmd":""}]}
+$env:LAVAPOLLO_APPDATA = $pc; $env:ProgramData = "$pc\pd"
+Start-Process build\t\sunshine.exe -ArgumentList "`"$pc\sunshine.conf`"" -WorkingDirectory build\t -WindowStyle Hidden -PassThru
+curl.exe -s http://127.0.0.1:40989/serverinfo      # LavTestHost, Test-PC-1
+```
+
+Arrêt : `taskkill /PID <pid> /T /F`, puis vérifier qu'aucun `sunshine.exe` de `build\t` ne reste. Construire :
+`ninja -C build/t -j 2 sunshine` (PATH `C:\msys64\ucrt64\bin;C:\msys64\usr\bin`, long : ~25 min à froid).
+
+> ⚠️ **Le service réel ne se touche jamais** : sur cette machine `ApolloService` écoute sur la base **45989**
+> (pas 47989), `C:\Program Files\LavApollo\config` n'est pas lisible en entier (base d'historique et clés
+> refusées, journal verrouillé) et sa base d'historique bouge toute seule : ne pas s'en servir comme témoin
+> d'intégrité. `C:\ProgramData\LavApollo\rtss_overrides.json` est écrit par le vrai service pendant un stream.
+
 ## Build
 
 Requires submodules (`git clone --recurse-submodules`, or `git submodule update --init --recursive`),
