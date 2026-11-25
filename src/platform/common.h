@@ -762,6 +762,13 @@ namespace platf {
    */
   std::uint64_t routed_link_bps(const boost::asio::ip::address &source, const boost::asio::ip::address &target, routed_link_info_t *info = nullptr);
 
+  /**
+   * @brief What kind of PC this is, from the SMBIOS chassis type: "tower" (desktop cases, all-in-one),
+   * "mini" (mini PC, stick, lunch box, embedded) or "laptop" (laptop, notebook, convertible, tablet).
+   * Empty when unknown. Read once. Windows only.
+   */
+  std::string chassis_form_factor();
+
   struct send_info_t {
     const char *header;
     size_t header_size;

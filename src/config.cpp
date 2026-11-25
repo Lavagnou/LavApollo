@@ -642,6 +642,8 @@ namespace config {
     {},  // test_host_appversion
     false,  // test_host_this_pc
     {},  // test_host_display
+    {},  // test_host_form_factor
+    {},  // test_host_link
   };
 
   bool endline(char ch) {
@@ -1419,6 +1421,8 @@ namespace config {
     string_f(vars, "test_host_appversion", sunshine.test_host_appversion);
     bool_f(vars, "test_host_this_pc", sunshine.test_host_this_pc);
     string_f(vars, "test_host_display", sunshine.test_host_display);
+    string_restricted_f(vars, "test_host_form_factor", sunshine.test_host_form_factor, {"tower"sv, "mini"sv, "laptop"sv});
+    string_restricted_f(vars, "test_host_link", sunshine.test_host_link, {"wired"sv, "wifi"sv});
 
     string_restricted_f(vars, "address_family", sunshine.address_family, {"ipv4"sv, "both"sv});
 

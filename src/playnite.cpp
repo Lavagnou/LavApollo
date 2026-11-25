@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -55,6 +57,19 @@ namespace playnite {
       return it->get<std::string>();
     }
 
+    std::string iso_utc(std::chrono::system_clock::time_point at) {
+      auto t = std::chrono::system_clock::to_time_t(at);
+      std::tm tm {};
+#ifdef _WIN32
+      gmtime_s(&tm, &t);
+#else
+      gmtime_r(&t, &tm);
+#endif
+      char buf[32];
+      std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+      return buf;
+    }
+
     // A GUID, the only thing a game id may be: it ends up in a command line.
     bool is_guid(const std::string &s) {
       if (s.size() != 36) {
@@ -76,8 +91,55 @@ namespace playnite {
     return root / "LavApollo" / "playnite";
   }
 
-  std::vector<game_t> parse_library(const std::string &json, const fs::path &covers_dir) {
+  std::int64_t parse_iso_utc(const std::string &text) {
+    int y, mo, d, h, mi, s;
+    if (text.size() < 19 || std::sscanf(text.c_str(), "%4d-%2d-%2d%*c%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &s) != 6) {
+      return 0;
+    }
+    if (text[4] != '-' || text[7] != '-' || (text[10] != 'T' && text[10] != ' ') || text[13] != ':' || text[16] != ':') {
+      return 0;
+    }
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 60) {
+      return 0;
+    }
+    std::size_t p = 19;
+    if (p < text.size() && text[p] == '.') {
+      p++;
+      while (p < text.size() && std::isdigit((unsigned char) text[p])) {
+        p++;
+      }
+    }
+    std::int64_t offset = 0;
+    if (p < text.size()) {
+      if (text[p] == 'Z' && p + 1 == text.size()) {
+        // UTC
+      } else if ((text[p] == '+' || text[p] == '-') && text.size() == p + 6 && text[p + 3] == ':' &&
+                 std::isdigit((unsigned char) text[p + 1]) && std::isdigit((unsigned char) text[p + 2]) &&
+                 std::isdigit((unsigned char) text[p + 4]) && std::isdigit((unsigned char) text[p + 5])) {
+        offset = ((text[p + 1] - '0') * 10 + (text[p + 2] - '0')) * 3600 + ((text[p + 4] - '0') * 10 + (text[p + 5] - '0')) * 60;
+        if (text[p] == '+') {
+          offset = -offset;
+        }
+      } else {
+        return 0;
+      }
+    }
+
+    // Days from 1970-01-01 (H. Hinnant's days_from_civil): no timegm/_mkgmtime, no local zone.
+    std::int64_t yy = y - (mo <= 2 ? 1 : 0);
+    std::int64_t era = (yy >= 0 ? yy : yy - 399) / 400;
+    std::int64_t yoe = yy - era * 400;
+    std::int64_t doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    std::int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    std::int64_t days = era * 146097 + doe - 719468;
+    std::int64_t seconds = days * 86400 + h * 3600 + mi * 60 + s + offset;
+    // Playnite's DateTime.MinValue and other placeholders are "never"
+    return seconds >= 31536000 ? seconds : 0;
+  }
+
+  std::vector<game_t> parse_library(const std::string &json, const fs::path &covers_dir, const fs::path &backgrounds_dir) {
     std::vector<game_t> games;
+    auto backgrounds = backgrounds_dir.empty() ? covers_dir.parent_path() / "backgrounds" : backgrounds_dir;
     try {
       auto tree = nlohmann::json::parse(json);
       auto list = tree.find("games");
@@ -95,10 +157,29 @@ namespace playnite {
           continue;
         }
         game.last_activity = string_field(node, "lastActivity");
+        game.last_played = parse_iso_utc(game.last_activity);
+        if (game.last_played == 0) {
+          // Unreadable or a placeholder: "never played", for the order too
+          game.last_activity.clear();
+        }
+        // Absent in library.json written by extension 1.0.x, which exported installed games only
+        auto installed = node.find("installed");
+        game.installed = installed == node.end() || !installed->is_boolean() || installed->get<bool>();
+        auto playtime = node.find("playtime");
+        if (playtime != node.end() && playtime->is_number_unsigned()) {
+          game.playtime = playtime->get<std::uint64_t>();
+        } else if (playtime != node.end() && playtime->is_number_integer() && playtime->get<std::int64_t>() > 0) {
+          game.playtime = (std::uint64_t) playtime->get<std::int64_t>();
+        }
         auto cover = string_field(node, "cover");
         // A bare file name inside covers\: never let the file point elsewhere.
         if (!cover.empty() && fs::path(cover).filename().string() == cover) {
           game.cover = covers_dir / cover;
+        }
+        // Same rule for the background, inside backgrounds\.
+        auto background = string_field(node, "background");
+        if (!background.empty() && fs::path(background).filename().string() == background) {
+          game.background = backgrounds / background;
         }
         games.emplace_back(std::move(game));
       }
@@ -124,6 +205,7 @@ namespace playnite {
         running.id = upper(string_field(*game, "id"));
         running.name = string_field(*game, "name");
         running.starting = game->value("starting", false);
+        running.started_at = parse_iso_utc(string_field(*game, "startedAt"));
         if (is_guid(running.id)) {
           state.game = std::move(running);
         }
@@ -144,23 +226,80 @@ namespace playnite {
     if (!text) {
       return {};
     }
-    auto games = parse_library(*text, dir / "covers");
+    auto games = parse_library(*text, dir / "covers", dir / "backgrounds");
     sort_recent_first(games);
     return games;
   }
 
   void sort_recent_first(std::vector<game_t> &games) {
-    // The extension writes every date with DateTime.ToString("o") in UTC: same length, same
-    // zone, so the strings sort as the dates do.
+    // By the parsed date, not the text: "...:00Z" and "...:00.0000000Z" are the same instant.
     std::sort(games.begin(), games.end(), [](const game_t &a, const game_t &b) {
-      if (a.last_activity != b.last_activity) {
-        if (a.last_activity.empty() || b.last_activity.empty()) {
-          return b.last_activity.empty();
+      if (a.last_played != b.last_played) {
+        if (a.last_played == 0 || b.last_played == 0) {
+          return b.last_played == 0;
         }
-        return a.last_activity > b.last_activity;
+        return a.last_played > b.last_played;
       }
       return lower(a.name) < lower(b.name);
     });
+  }
+
+  std::shared_ptr<const std::vector<game_t>> library_snapshot() {
+    static std::mutex lock;
+    static std::shared_ptr<const std::vector<game_t>> cached = std::make_shared<const std::vector<game_t>>();
+    static std::chrono::steady_clock::time_point last_check;
+    static fs::file_time_type last_write {};
+    static bool loaded = false;
+
+    std::lock_guard lg(lock);
+    auto now = std::chrono::steady_clock::now();
+    if (loaded && now - last_check < 2s) {
+      return cached;
+    }
+    last_check = now;
+
+    std::error_code ec;
+    auto write = fs::last_write_time(exchange_dir() / "library.json", ec);
+    if (ec) {
+      write = {};
+    }
+    if (!loaded || write != last_write) {
+      cached = std::make_shared<const std::vector<game_t>>(load_library());
+      last_write = write;
+      loaded = true;
+    }
+    return cached;
+  }
+
+  std::vector<std::size_t> library_order(const std::vector<std::string> &ids, const std::vector<game_t> &library) {
+    std::vector<std::size_t> rank(ids.size(), library.size());
+    for (std::size_t i = 0; i < ids.size(); i++) {
+      auto key = upper(ids[i]);
+      for (std::size_t r = 0; r < library.size(); r++) {
+        if (library[r].id == key) {
+          rank[i] = r;
+          break;
+        }
+      }
+    }
+    std::vector<std::size_t> order(ids.size());
+    for (std::size_t i = 0; i < order.size(); i++) {
+      order[i] = i;
+    }
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+      return rank[a] < rank[b];
+    });
+    return order;
+  }
+
+  const game_t *find_game(const std::vector<game_t> &library, const std::string &id) {
+    auto key = upper(id);
+    for (auto &game : library) {
+      if (game.id == key) {
+        return &game;
+      }
+    }
+    return nullptr;
   }
 
   bool library_changed() {
@@ -284,7 +423,7 @@ namespace playnite {
         break;
       }
     }
-    if (write_test_state({{"id", lower(id)}, {"name", name}, {"starting", false}})) {
+    if (write_test_state({{"id", lower(id)}, {"name", name}, {"starting", false}, {"startedAt", iso_utc(std::chrono::system_clock::now())}})) {
       test_host::log("events", {{"playnite_launch", lower(id)}});
     }
     return true;
@@ -314,18 +453,7 @@ namespace playnite {
     nlohmann::json command;
     command["action"] = "stop-game";
     command["gameId"] = lower(game_id);
-    {
-      auto t = std::chrono::system_clock::to_time_t(now);
-      std::tm tm {};
-#ifdef _WIN32
-      gmtime_s(&tm, &t);
-#else
-      gmtime_r(&t, &tm);
-#endif
-      char buf[32];
-      std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
-      command["issuedAt"] = buf;
-    }
+    command["issuedAt"] = iso_utc(now);
 
     auto name = "stop-" + std::to_string(stamp) + "-" + std::to_string(counter++) + ".json";
     auto tmp = dir / (name + ".tmp");

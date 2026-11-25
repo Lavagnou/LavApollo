@@ -335,6 +335,8 @@ namespace config {
     /// and refuses to stream to it (to test that refusal)
     bool test_host_this_pc;
     std::string test_host_display;  ///< Display mode serverinfo announces, `WxHxR` (empty: 1920x1080x60)
+    std::string test_host_form_factor;  ///< HostFormFactor serverinfo announces (tower, mini, laptop; empty: none)
+    std::string test_host_link;  ///< HostLink serverinfo announces (wired, wifi; empty: none)
   };
 
   /**

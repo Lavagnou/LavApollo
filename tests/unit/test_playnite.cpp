@@ -67,6 +67,71 @@ TEST(Playnite, sortRecentFirst) {
   EXPECT_EQ(games[3].name, "never played b");
 }
 
+TEST(Playnite, sortRecentFirstComparesDatesNotText) {
+  // The testbench and older exports write whole seconds; Playnite's "o" format has 7 decimals.
+  auto games = playnite::parse_library(R"({"games": [
+    {"id": "11111111-0000-0000-0000-000000000001", "name": "A", "lastActivity": "2026-11-20T21:00:00.5000000Z"},
+    {"id": "11111111-0000-0000-0000-000000000002", "name": "B", "lastActivity": "2026-11-20T21:00:01Z"},
+    {"id": "11111111-0000-0000-0000-000000000003", "name": "C", "lastActivity": "2026-11-20T22:00:00+02:00"}
+  ]})", "C:\\covers");
+  playnite::sort_recent_first(games);
+  ASSERT_EQ(games.size(), 3u);
+  EXPECT_EQ(games[0].name, "B");
+  EXPECT_EQ(games[1].name, "A");
+  EXPECT_EQ(games[2].name, "C");  // 20:00 UTC
+}
+
+TEST(Playnite, parseIsoUtc) {
+  EXPECT_EQ(playnite::parse_iso_utc("1970-01-02T00:00:00Z"), 0);  // placeholder-old: "never"
+  EXPECT_EQ(playnite::parse_iso_utc("2026-11-20T21:00:00Z"), 1795208400);
+  EXPECT_EQ(playnite::parse_iso_utc("2026-11-20T21:00:00.0000000Z"), 1795208400);
+  EXPECT_EQ(playnite::parse_iso_utc("2026-11-20T22:30:00+01:30"), 1795208400);
+  EXPECT_EQ(playnite::parse_iso_utc("2026-11-20T21:00:00"), 1795208400);
+  EXPECT_EQ(playnite::parse_iso_utc("0001-01-01T00:00:00.0000000"), 0);  // DateTime.MinValue
+  EXPECT_EQ(playnite::parse_iso_utc(""), 0);
+  EXPECT_EQ(playnite::parse_iso_utc("yesterday"), 0);
+  EXPECT_EQ(playnite::parse_iso_utc("2026-13-20T21:00:00Z"), 0);
+  EXPECT_EQ(playnite::parse_iso_utc("2026-11-20T21:00:00Zjunk"), 0);
+}
+
+TEST(Playnite, parseLibraryExtraFields) {
+  auto games = playnite::parse_library(R"({"games": [
+    {"id": "11111111-0000-0000-0000-000000000001", "name": "Installed", "installed": true, "playtime": 7200,
+     "background": "11111111-0000-0000-0000-000000000001.jpg", "lastActivity": "2026-11-20T21:00:00Z"},
+    {"id": "11111111-0000-0000-0000-000000000002", "name": "Not installed", "installed": false, "playtime": 0,
+     "background": "..\\escape.jpg"},
+    {"id": "11111111-0000-0000-0000-000000000003", "name": "Old export"}
+  ]})", "C:\\pn\\covers");
+  ASSERT_EQ(games.size(), 3u);
+  EXPECT_TRUE(games[0].installed);
+  EXPECT_EQ(games[0].playtime, 7200u);
+  EXPECT_EQ(games[0].last_played, 1795208400);
+  EXPECT_EQ(games[0].background, std::filesystem::path("C:\\pn") / "backgrounds" / "11111111-0000-0000-0000-000000000001.jpg");
+  EXPECT_FALSE(games[1].installed);
+  EXPECT_TRUE(games[1].background.empty());  // not a bare file name: dropped
+  EXPECT_EQ(games[1].last_played, 0);
+  // Extension 1.0.x: installed games only, no installed field
+  EXPECT_TRUE(games[2].installed);
+  EXPECT_EQ(games[2].playtime, 0u);
+}
+
+TEST(Playnite, libraryOrderFollowsTheLibrary) {
+  auto library = playnite::parse_library(R"({"games": [
+    {"id": "11111111-0000-0000-0000-000000000001", "name": "Old", "lastActivity": "2026-01-01T00:00:00Z"},
+    {"id": "11111111-0000-0000-0000-000000000002", "name": "Just played", "lastActivity": "2026-11-25T20:00:00Z"}
+  ]})", "C:\\covers");
+  playnite::sort_recent_first(library);
+  // The app list was built before "Just played" was played; a third game left the library since
+  std::vector<std::string> ids {"11111111-0000-0000-0000-000000000001", "11111111-0000-0000-0000-0000000000AA", "11111111-0000-0000-0000-000000000002"};
+  auto order = playnite::library_order(ids, library);
+  ASSERT_EQ(order.size(), 3u);
+  EXPECT_EQ(order[0], 2u);
+  EXPECT_EQ(order[1], 0u);
+  EXPECT_EQ(order[2], 1u);
+  EXPECT_EQ(playnite::find_game(library, "11111111-0000-0000-0000-000000000002")->name, "Just played");
+  EXPECT_EQ(playnite::find_game(library, "11111111-0000-0000-0000-0000000000AA"), nullptr);
+}
+
 TEST(Playnite, parseLibraryMalformed) {
   EXPECT_TRUE(playnite::parse_library("{not json", "C:\\covers").empty());
   EXPECT_TRUE(playnite::parse_library("{\"games\": 3}", "C:\\covers").empty());
@@ -81,6 +146,12 @@ TEST(Playnite, parseState) {
   ASSERT_TRUE(state->game.has_value());
   EXPECT_EQ(state->game->id, "FB5D018A-058E-4FFE-AE4B-3FD3D48A5B28");
   EXPECT_TRUE(state->game->starting);
+  EXPECT_EQ(state->game->started_at, 0);
+
+  auto started = playnite::parse_state(R"({"playniteRunning": true, "mode": "fullscreen",
+    "game": {"id": "fb5d018a-058e-4ffe-ae4b-3fd3d48a5b28", "name": "Cyberpunk 2077", "startedAt": "2026-11-20T21:00:00.0000000Z"}})");
+  ASSERT_TRUE(started && started->game);
+  EXPECT_EQ(started->game->started_at, 1795208400);
 }
 
 TEST(Playnite, closedPlayniteRunsNoGame) {

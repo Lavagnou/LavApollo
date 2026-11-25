@@ -449,7 +449,9 @@ TEST_F(ConfigConsistencyTest, AllConfigOptionsExistInAllFiles) {
     "test_host_mac",
     "test_host_appversion",
     "test_host_this_pc",
-    "test_host_display"
+    "test_host_display",
+    "test_host_form_factor",
+    "test_host_link"
   };
 
   std::vector<std::string> missingFromFiles;
@@ -636,7 +638,9 @@ TEST_F(ConfigConsistencyTest, TestFrameworkDetectsMissingOptions) {
     "test_host_mac",
     "test_host_appversion",
     "test_host_this_pc",
-    "test_host_display"
+    "test_host_display",
+    "test_host_form_factor",
+    "test_host_link"
   };
 
   std::vector<std::string> missingFromFiles;

@@ -11,7 +11,9 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,12 +24,17 @@ namespace playnite {
     std::string name;
     std::filesystem::path cover;  ///< absolute PNG path, empty when the game has none
     std::string last_activity;  ///< Playnite's last play time, ISO 8601 UTC ("o"), empty if never played
+    std::int64_t last_played = 0;  ///< last_activity as Unix seconds, 0 if never played (or unreadable)
+    bool installed = true;  ///< absent from library.json (extension 1.0.x exported installed games only): true
+    std::uint64_t playtime = 0;  ///< Playnite's Playtime, seconds
+    std::filesystem::path background;  ///< absolute background image path (JPEG), empty when none
   };
 
   struct running_game_t {
     std::string id;  ///< upper case
     std::string name;
     bool starting = false;  ///< Playnite is still starting it (OnGameStarting)
+    std::int64_t started_at = 0;  ///< Unix seconds the extension saw it start, 0 if unknown
   };
 
   struct state_t {
@@ -36,11 +43,20 @@ namespace playnite {
     std::optional<running_game_t> game;
   };
 
+  /// How long the session of a game Playnite is installing waits for the game (watch_t launch grace):
+  /// the install, then the user starting it, take as long as they take.
+  constexpr std::chrono::hours install_grace {24};
+
   /// %ProgramData%\LavApollo\playnite
   std::filesystem::path exchange_dir();
 
-  /// Parses library.json; covers resolve against `covers_dir`. Malformed input gives no games.
-  std::vector<game_t> parse_library(const std::string &json, const std::filesystem::path &covers_dir);
+  /// Parses library.json; covers resolve against `covers_dir`, backgrounds against `backgrounds_dir`
+  /// (default: a `backgrounds` folder next to `covers_dir`). Malformed input gives no games.
+  std::vector<game_t> parse_library(const std::string &json, const std::filesystem::path &covers_dir, const std::filesystem::path &backgrounds_dir = {});
+
+  /// An ISO 8601 date and time ("2026-11-20T21:00:00Z", "...:00.1234567Z", "+01:00" offsets; no zone = UTC)
+  /// as Unix seconds. 0 when unreadable or before 1971.
+  std::int64_t parse_iso_utc(const std::string &text);
 
   /// Parses state.json. Malformed input gives nothing.
   std::optional<state_t> parse_state(const std::string &json);
@@ -48,9 +64,28 @@ namespace playnite {
   /// Most recently played first, as Playnite's "Recent activity" sort; never played games last, by name.
   void sort_recent_first(std::vector<game_t> &games);
 
-  /// The installed games, from the exchange folder, most recently played first (the clients show
-  /// them in this order). Empty when the extension never ran.
+  /// The exported games (installed or not, never the hidden ones), from the exchange folder, most
+  /// recently played first (the clients show them in this order). Empty when the extension never ran.
   std::vector<game_t> load_library();
+
+  /**
+   * @brief The library as library.json says right now (re-read when the file changes, checked at
+   * most every 2 s), most recently played first.
+   *
+   * Unlike the app list, which is rebuilt only when nothing runs (proc::refresh() replaces the running
+   * app), this follows every export of the extension: /applist orders the game apps and gives their
+   * installed state, play time and last activity from it, also while a session runs. Never null.
+   */
+  std::shared_ptr<const std::vector<game_t>> library_snapshot();
+
+  /**
+   * @brief The order to list these game ids in: `library`'s (most recently played first), then the
+   * ids absent from it, in their own order. Indices into `ids`.
+   */
+  std::vector<std::size_t> library_order(const std::vector<std::string> &ids, const std::vector<game_t> &library);
+
+  /// The game of this id (upper case) in `library`, null when absent.
+  const game_t *find_game(const std::vector<game_t> &library, const std::string &id);
 
   /// Whether library.json changed since the last call (checked at most every 5 s).
   bool library_changed();

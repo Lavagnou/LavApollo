@@ -160,6 +160,10 @@ namespace proc {
     std::string get_last_run_app_name();
     std::string get_running_app_uuid();
 
+    /// How long ago the running app was launched (serverinfo CurrentGameElapsed), nothing when none runs.
+    /// Call it after running(), which ends a finished app.
+    std::optional<std::chrono::seconds> running_app_elapsed();
+
     /// Whether the running app is the user's Playnite front end (see ctx_t::playnite_host).
     bool running_app_is_playnite_host();
 

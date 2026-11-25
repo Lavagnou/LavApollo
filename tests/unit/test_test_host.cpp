@@ -395,6 +395,25 @@ TEST_F(TestHost, InvalidUtf8InTheLogDoesNotThrowAndIsStillRecorded) {
   EXPECT_EQ(read_lines(test_host::dir() / "events.jsonl").size(), 1u);
 }
 
+TEST_F(TestHost, FormFactorAndLinkComeFromTheConfigOnly) {
+  parse("test_host = enabled\n");
+  EXPECT_TRUE(config::sunshine.test_host_form_factor.empty());
+  EXPECT_TRUE(config::sunshine.test_host_link.empty());
+
+  // Anything but the known values is refused at parse time: serverinfo then says nothing
+  parse("test_host = enabled\ntest_host_form_factor = server\ntest_host_link = 5g\n");
+  EXPECT_TRUE(config::sunshine.test_host_form_factor.empty());
+  EXPECT_TRUE(config::sunshine.test_host_link.empty());
+
+  parse("test_host = enabled\ntest_host_form_factor = laptop\ntest_host_link = wifi\n");
+  EXPECT_EQ(config::sunshine.test_host_form_factor, "laptop");
+  EXPECT_EQ(config::sunshine.test_host_link, "wifi");
+
+  // config::parse() only assigns: leave the globals as the other tests expect them
+  config::sunshine.test_host_form_factor.clear();
+  config::sunshine.test_host_link.clear();
+}
+
 TEST_F(TestHost, AnnouncesAFixedDisplayModeNeverTheRealMonitor) {
   // Default: 1920x1080@60, whatever the monitor of this PC
   parse("test_host = enabled\n");

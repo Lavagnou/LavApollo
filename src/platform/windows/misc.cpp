@@ -1523,6 +1523,79 @@ namespace platf {
     return saddr_v6;
   }
 
+  namespace {
+    // SMBIOS System Enclosure (type 3) chassis type -> the three kinds of PC LavArtemis draws
+    std::string form_factor_of_chassis(int type) {
+      switch (type) {
+        case 8:  // Portable
+        case 9:  // Laptop
+        case 10:  // Notebook
+        case 11:  // Hand Held
+        case 14:  // Sub Notebook
+        case 30:  // Tablet
+        case 31:  // Convertible
+        case 32:  // Detachable
+          return "laptop";
+        case 16:  // Lunch Box
+        case 34:  // Embedded PC
+        case 35:  // Mini PC
+        case 36:  // Stick PC
+          return "mini";
+        case 3:  // Desktop
+        case 4:  // Low Profile Desktop
+        case 5:  // Pizza Box
+        case 6:  // Mini Tower
+        case 7:  // Tower
+        case 13:  // All in One
+        case 15:  // Space-saving
+        case 24:  // Sealed-case PC
+          return "tower";
+        default:
+          return {};
+      }
+    }
+
+    std::string read_chassis_form_factor() {
+      auto size = GetSystemFirmwareTable('RSMB', 0, nullptr, 0);
+      if (size < 8) {
+        return {};
+      }
+      std::vector<std::uint8_t> buffer(size);
+      if (GetSystemFirmwareTable('RSMB', 0, buffer.data(), size) != size) {
+        return {};
+      }
+      // RawSMBIOSData: 4 version bytes, a DWORD length, then the structure table
+      std::uint32_t length = buffer[4] | (buffer[5] << 8) | (buffer[6] << 16) | ((std::uint32_t) buffer[7] << 24);
+      std::size_t p = 8;
+      std::size_t end = std::min<std::size_t>(buffer.size(), 8 + (std::size_t) length);
+      while (p + 4 <= end) {
+        auto type = buffer[p];
+        auto formatted = buffer[p + 1];
+        if (formatted < 4 || p + formatted > end) {
+          break;
+        }
+        if (type == 3 && formatted > 5) {
+          return form_factor_of_chassis(buffer[p + 5] & 0x7F);
+        }
+        if (type == 127) {
+          break;  // end of table
+        }
+        // The strings follow the formatted area, ended by two NULs
+        std::size_t q = p + formatted;
+        while (q + 1 < end && (buffer[q] != 0 || buffer[q + 1] != 0)) {
+          q++;
+        }
+        p = q + 2;
+      }
+      return {};
+    }
+  }  // namespace
+
+  std::string chassis_form_factor() {
+    static const std::string form = read_chassis_form_factor();
+    return form;
+  }
+
   std::uint64_t routed_link_bps(const boost::asio::ip::address &source, const boost::asio::ip::address &target, routed_link_info_t *info) {
     auto socket_address = [](const boost::asio::ip::address &address) {
       SOCKADDR_INET result {};

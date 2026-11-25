@@ -859,9 +859,22 @@ namespace proc {
     _app_launch_time = std::chrono::steady_clock::now();
 
     _playnite_game_closed = false;
-    _playnite_watch = _app.playnite_game_id.empty() ?
-                        playnite::watch_t {} :
-                        playnite::watch_t {_app.playnite_game_id, _app_launch_time};
+    if (_app.playnite_game_id.empty()) {
+      _playnite_watch = playnite::watch_t {};
+    } else {
+      // A game that is not installed: Playnite installs it instead of starting it (GamesEditor.PlayGame
+      // calls InstallGame), which takes longer than any launch grace. The session then lasts until the
+      // client quits it, or until the game, once started from the PC, closes.
+      auto library = playnite::library_snapshot();
+      auto game = playnite::find_game(*library, _app.playnite_game_id);
+      bool installing = game && !game->installed;
+      if (installing) {
+        BOOST_LOG(info) << "Playnite game ["sv << _app.name << "] is not installed: Playnite will offer to install it"sv;
+      }
+      _playnite_watch = installing ?
+                          playnite::watch_t {_app.playnite_game_id, _app_launch_time, playnite::install_grace} :
+                          playnite::watch_t {_app.playnite_game_id, _app_launch_time};
+    }
 
   #ifdef _WIN32
     // Test host mode never toggles HDR on a real display. No thread means mode_changed_display and
@@ -930,6 +943,13 @@ namespace proc {
 #endif
 
     return 0;
+  }
+
+  std::optional<std::chrono::seconds> proc_t::running_app_elapsed() {
+    if (_app_id <= 0) {
+      return std::nullopt;
+    }
+    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - _app_launch_time);
   }
 
   bool proc_t::running_app_is_playnite_host() {

@@ -1217,6 +1217,33 @@ namespace nvhttp {
         tree.put("root.BenchmarkAppId", proc::benchmark_app_id);
         tree.put("root.BenchmarkAppUuid", BENCHMARK_APP_UUID);
       }
+
+      // LavArtemis Dev (the PC's card): what kind of PC this is, from the SMBIOS chassis type, and
+      // whether the interface that reaches this client is wired or Wi-Fi. Absent when unknown.
+      {
+        std::string form_factor;
+        std::string link_kind;
+        if (test_host::enabled()) {
+          // The fake PC's, never this machine's
+          form_factor = config::sunshine.test_host_form_factor;
+          link_kind = config::sunshine.test_host_link;
+        } else {
+          form_factor = platf::chassis_form_factor();
+          platf::routed_link_info_t link;
+          platf::routed_link_bps(local_endpoint.address(), request->remote_endpoint().address(), &link);
+          if (link.if_type == 71 /* IF_TYPE_IEEE80211 */) {
+            link_kind = "wifi";
+          } else if (link.if_type == 6 /* IF_TYPE_ETHERNET_CSMACD */) {
+            link_kind = "wired";
+          }
+        }
+        if (!form_factor.empty()) {
+          tree.put("root.HostFormFactor", form_factor);
+        }
+        if (!link_kind.empty()) {
+          tree.put("root.HostLink", link_kind);
+        }
+      }
     #endif
     } else {
       tree.put("root.mac", "00:00:00:00:00:00");
@@ -1265,6 +1292,13 @@ namespace nvhttp {
       tree.put("root.currentgame", current_appid);
       tree.put("root.currentgameuuid", proc::proc.get_running_app_uuid());
       tree.put("root.state", current_appid > 0 ? "SUNSHINE_SERVER_BUSY" : "SUNSHINE_SERVER_FREE");
+      // LavArtemis Dev: how long the running app has run ("depuis 42 min"), in seconds. Elapsed
+      // rather than a date: the client's clock needs not agree with this one.
+      if (current_appid > 0) {
+        if (auto elapsed = proc::proc.running_app_elapsed()) {
+          tree.put("root.CurrentGameElapsed", elapsed->count());
+        }
+      }
 
       // LavApollo Link (Playnite), only when the extension is installed: the game running in
       // Playnite, and whether the running app is the Playnite front end, where a Playnite game
@@ -1273,6 +1307,11 @@ namespace nvhttp {
         if (playnite_state->game && !playnite_state->game->starting) {
           tree.put("root.PlayniteGameName", playnite_state->game->name);
           tree.put("root.PlayniteGameUuid", playnite_state->game->id);
+          // Seconds since Playnite started it (state.json startedAt, this PC's clock)
+          if (playnite_state->game->started_at > 0) {
+            auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            tree.put("root.PlayniteGameElapsed", std::max<std::int64_t>(0, now - playnite_state->game->started_at));
+          }
         }
         tree.put("root.PlayniteHostRunning", current_appid > 0 && proc::proc.running_app_is_playnite_host() ? 1 : 0);
       }
@@ -1415,6 +1454,30 @@ namespace nvhttp {
     return benchmark_appid <= 0 || appid != benchmark_appid || appid == current_appid;
   }
 
+  /// Puts the Playnite game apps in the library's current order, in the slots they already take.
+  void order_playnite_games(std::vector<proc::ctx_t> &apps, const std::vector<playnite::game_t> &library) {
+    std::vector<std::size_t> slots;
+    std::vector<std::string> ids;
+    for (std::size_t i = 0; i < apps.size(); i++) {
+      if (!apps[i].playnite_game_id.empty()) {
+        slots.push_back(i);
+        ids.push_back(apps[i].playnite_game_id);
+      }
+    }
+    if (slots.size() < 2) {
+      return;
+    }
+    auto order = playnite::library_order(ids, library);
+    std::vector<proc::ctx_t> games;
+    games.reserve(slots.size());
+    for (auto k : order) {
+      games.push_back(apps[slots[k]]);
+    }
+    for (std::size_t k = 0; k < slots.size(); k++) {
+      apps[slots[k]] = std::move(games[k]);
+    }
+  }
+
   void applist(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1449,6 +1512,14 @@ namespace nvhttp {
       bool with_playnite_games = get_arg(applist_args, "playnite", "0") == "1";
 
       auto app_list = proc::proc.get_apps();
+
+      // The game apps in the library's current order (most recently played first) with their current
+      // state. The app list itself is rebuilt only when nothing runs, so without this a game played
+      // inside the running Playnite front end never moved up the clients' "Récents".
+      auto library = playnite::library_snapshot();
+      if (with_playnite_games) {
+        order_playnite_games(app_list, *library);
+      }
 
       bool enable_legacy_ordering = config::sunshine.legacy_ordering && named_cert_p->enable_legacy_ordering;
       size_t bits;
@@ -1498,6 +1569,18 @@ namespace nvhttp {
         app_node.put("ID", app.id);
         if (!app.playnite_game_id.empty()) {
           app_node.put("IsPlayniteGame", 1);
+          // LavArtemis Dev (prototype data): absent when the game left library.json since the list was built
+          if (auto game = playnite::find_game(*library, app.playnite_game_id)) {
+            app_node.put("PlayniteInstalled", game->installed ? 1 : 0);
+            app_node.put("PlaynitePlaytime", game->playtime);
+            if (game->last_played > 0) {
+              app_node.put("PlayniteLastActivity", game->last_played);
+            }
+            std::error_code ec;
+            if (!game->background.empty() && fs::is_regular_file(game->background, ec)) {
+              app_node.put("PlayniteBackground", 1);
+            }
+          }
         }
         if (app.playnite_host && with_playnite_games) {
           // The Playnite front end, where Playnite games start without ending the session
@@ -2010,6 +2093,36 @@ namespace nvhttp {
 
     auto args = request->parse_query_string();
     auto app_id = util::from_view(get_arg(args, "appid"));
+
+    // LavArtemis Dev: a Playnite game's background image (`PlayniteBackground=1` in /applist), a
+    // JPEG exported by LavApollo Link. 404 when it has none: never the cover nor box.png, which
+    // clients would show as a background. Hosts without it ignore `asset` and send the cover, so
+    // clients ask only for games the applist flags.
+    if (get_arg(args, "asset", "") == "background") {
+      fs::path background;
+      for (auto &app : proc::proc.get_apps()) {
+        if (app.id == std::to_string(app_id) && !app.playnite_game_id.empty()) {
+          auto library = playnite::library_snapshot();
+          if (auto game = playnite::find_game(*library, app.playnite_game_id)) {
+            background = game->background;
+          }
+          break;
+        }
+      }
+      fg.disable();
+      std::error_code ec;
+      if (background.empty() || !fs::is_regular_file(background, ec)) {
+        response->write(SimpleWeb::StatusCode::client_error_not_found);
+        response->close_connection_after_response = true;
+        return;
+      }
+      std::ifstream in(background, std::ios::binary);
+      SimpleWeb::CaseInsensitiveMultimap headers;
+      headers.emplace("Content-Type", boost::iequals(background.extension().string(), ".png") ? "image/png" : "image/jpeg");
+      response->write(SimpleWeb::StatusCode::success_ok, in, headers);
+      response->close_connection_after_response = true;
+      return;
+    }
 
     if (proc::proc.is_coverless_playnite_game(app_id)) {
       fg.disable();
