@@ -19,6 +19,7 @@ namespace LavApolloLink
         public static string LibraryFile => Path.Combine(Root, "library.json");
         public static string StateFile => Path.Combine(Root, "state.json");
         public static string CoversDir => Path.Combine(Root, "covers");
+        public static string BackgroundsDir => Path.Combine(Root, "backgrounds");
 
         // Created by this extension, never by LavApollo: the folder's creator owns it, which is what
         // lets the extension delete the command files LavApollo (SYSTEM) writes into it.
@@ -28,6 +29,7 @@ namespace LavApolloLink
         {
             Directory.CreateDirectory(Root);
             Directory.CreateDirectory(CoversDir);
+            Directory.CreateDirectory(BackgroundsDir);
             Directory.CreateDirectory(CommandsDir);
         }
 
@@ -63,7 +65,9 @@ namespace LavApolloLink
         public bool favorite { get; set; }
         public string lastActivity { get; set; }
         public ulong playtime { get; set; }
+        public bool installed { get; set; }
         public string cover { get; set; }
+        public string background { get; set; }
     }
 
     public class ExportedLibrary
