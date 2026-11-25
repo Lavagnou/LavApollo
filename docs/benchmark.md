@@ -60,7 +60,10 @@ Each run is described by a configuration:
 | `pacing` | desktop: `vsync-off`, `vsync`, `vsync-paced`, `vrr-low-latency`, `vrr-balanced`, `vrr-smooth` · Android: `default`, `ull`, `paced-ull`, `predictive`, `vrr-low-latency`, `vrr-balanced`, `vrr-smooth` |
 
 The **baseline** run streams with the user's own settings, untouched; its `pacing` is the closest name for
-them. Every run records the configuration **requested** and the one **in effect**: clients fall back
+them. The baseline and its repeat record as **requested** the configuration they streamed (their `effective`
+one): with the codec on Auto there is no codec to request, and the plan is made from these runs -- the
+adaptive climb and the confirmation on a guess (HEVC for Auto) would stream a codec the baseline never used.
+Every run records the configuration **requested** and the one **in effect**: clients fall back
 silently (AV1 → HEVC → H.264 without a hardware decoder, PyroWave → H.264, VRR refused by the display). A run
 whose effective codec or VRR differs from the request is marked `fallback` and does not count; the
 remaining runs that would fall back the same way are skipped.
@@ -171,3 +174,20 @@ Reports are JSON, the same on both clients, so either opens the other's. Desktop
 ```
 
 Unknown fields are ignored on reading, so later versions can add metrics without breaking older readers.
+
+### Notes
+
+A run's `note` is written **in English**, in one of these forms, and translated when it is shown, so a report
+reads the same on both clients in any language (desktop `Benchmark::Notes`, Android `BenchmarkNotes`):
+
+| Note | When |
+|---|---|
+| `<codec> is not available: the device fell back to <codec>` · `VRR is not available on this display` | a run skipped by the planner (codec ids: `h264`, `hevc`…) |
+| `Ran as <codec>, <pacing> instead.` | a fallback (ids: `Ran as h264, vsync instead.`) |
+| `Starting <stage> failed: error <n>.` | a connection stage failed (moonlight-common-c's stage name, `RTSP handshake`) |
+| `The connection ended (error <n>).` | the stream ended with an error during the run |
+| `The stream did not start.` · `The stream could not start.` | no connection (desktop) |
+| `No frames arrived to measure.` · `The run was cut short.` · `No frames were shown.` | nothing to measure |
+| `The bitrate was capped at <n> Mbps.` | the host lowered the bitrate (decimal point, `12.5`) |
+
+Any other note (a launch error message, or a report written before 2026-11-25) is shown as it is.
