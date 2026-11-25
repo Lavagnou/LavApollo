@@ -397,8 +397,7 @@ TEST_F(TestHost, InvalidUtf8InTheLogDoesNotThrowAndIsStillRecorded) {
 
 TEST_F(TestHost, AnnouncesAFixedDisplayModeNeverTheRealMonitor) {
   // Default: 1920x1080@60, whatever the monitor of this PC
-  parse("test_host = enabled
-");
+  parse("test_host = enabled\n");
   auto m = current_display::captured();
   ASSERT_TRUE(m.has_value());
   EXPECT_EQ(m->width, 1920);
@@ -406,9 +405,7 @@ TEST_F(TestHost, AnnouncesAFixedDisplayModeNeverTheRealMonitor) {
   EXPECT_EQ(m->refresh, 60);
 
   // The fixture's mode
-  parse("test_host = enabled
-test_host_display = 2560x1600x120
-");
+  parse("test_host = enabled\ntest_host_display = 2560x1600x120\n");
   EXPECT_EQ(config::sunshine.test_host_display, "2560x1600x120");
   m = current_display::captured();
   ASSERT_TRUE(m.has_value());
@@ -417,9 +414,7 @@ test_host_display = 2560x1600x120
   EXPECT_EQ(m->refresh, 120);
 
   // A malformed value is dropped at parse time (warning), the default is announced
-  parse("test_host = enabled
-test_host_display = 2560x1600
-");
+  parse("test_host = enabled\ntest_host_display = 2560x1600\n");
   EXPECT_TRUE(config::sunshine.test_host_display.empty());
   m = current_display::captured();
   ASSERT_TRUE(m.has_value());
