@@ -46,6 +46,7 @@
 #include "video.h"
 #include "session_history.h"
 #include "stream.h"
+#include "current_display.h"
 #include "test_host.h"
 #include "utility.h"
 #include "updater.h"
@@ -2836,6 +2837,115 @@ namespace confighttp {
   }
 
   /**
+   * @brief Test host mode: the guard and body parsing shared by the `/api/test/*` control routes below.
+   *
+   * Same rules as `/api/test/pin`: test host mode only (routes registered in `start()`), 127.0.0.1 only,
+   * no authentication. Returns false after answering when the request is refused.
+   */
+  bool test_route_request(resp_https_t &response, req_https_t &request, nlohmann::json &body, bool needs_body) {
+    auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    if (!test_pin_address_allowed(address)) {
+      BOOST_LOG(warning) << "Test host: control route refused for ["sv << address << ']';
+      nlohmann::json tree;
+      tree["status"] = false;
+      tree["error"] = "Forbidden";
+      response->write(SimpleWeb::StatusCode::client_error_forbidden, tree.dump(), SimpleWeb::CaseInsensitiveMultimap {{"Content-Type", "application/json"}});
+      return false;
+    }
+    if (!needs_body) {
+      return true;
+    }
+    if (!validateContentType(response, request, "application/json")) {
+      return false;
+    }
+    try {
+      std::stringstream ss;
+      ss << request->content.rdbuf();
+      body = nlohmann::json::parse(ss.str());
+      return true;
+    } catch (std::exception &e) {
+      BOOST_LOG(warning) << "Test host control route: "sv << e.what();
+      bad_request(response, request, e.what());
+      return false;
+    }
+  }
+
+  /**
+   * @brief Test host mode: change the display mode serverinfo announces, as when the host's display
+   * changes mid-session (`POST /api/test/display`, `{"mode":"2560x1440x60"}`, `""` = the config value).
+   */
+  void setTestDisplay(resp_https_t response, req_https_t request) {
+    nlohmann::json body;
+    if (!test_route_request(response, request, body, true)) {
+      return;
+    }
+    const std::string mode = body.value("mode", "");
+    if (!mode.empty() && !current_display::parse_mode(mode)) {
+      bad_request(response, request, "mode: WIDTHxHEIGHTxREFRESH");
+      return;
+    }
+    test_host::set_display(mode);
+    test_host::log("events", {{"test_display", mode}});
+    send_response(response, nlohmann::json {{"status", true}});
+  }
+
+  /**
+   * @brief Test host mode: make the next request of a kind fail (`POST /api/test/fail`,
+   * `{"what":"launch"|"resume"|"cancel"}`, see test_host::fail_next()).
+   */
+  void setTestFailure(resp_https_t response, req_https_t request) {
+    nlohmann::json body;
+    if (!test_route_request(response, request, body, true)) {
+      return;
+    }
+    const std::string what = body.value("what", "");
+    if (what != "launch" && what != "resume" && what != "cancel") {
+      bad_request(response, request, "what: launch, resume or cancel");
+      return;
+    }
+    test_host::fail_next(what);
+    send_response(response, nlohmann::json {{"status", true}});
+  }
+
+  /**
+   * @brief Test host mode: the host ends the stream, as when the streamed app exits on the PC
+   * (`POST /api/test/terminate`): the clients get a graceful termination.
+   */
+  void testTerminate(resp_https_t response, req_https_t request) {
+    nlohmann::json body;
+    if (!test_route_request(response, request, body, false)) {
+      return;
+    }
+    const bool running = proc::proc.running() > 0;
+    if (running) {
+      proc::proc.terminate();
+    }
+    test_host::log("events", {{"test_terminate", running}});
+    send_response(response, nlohmann::json {{"status", running}});
+  }
+
+  /**
+   * @brief Test host mode: the fake PC's clipboard (`GET /api/test/clipboard` -> `{"text":...}`;
+   * `POST {"text":...}` sets it, as if copied on the PC).
+   */
+  void getTestClipboard(resp_https_t response, req_https_t request) {
+    nlohmann::json body;
+    if (!test_route_request(response, request, body, false)) {
+      return;
+    }
+    send_response(response, nlohmann::json {{"status", true}, {"text", test_host::clipboard()}});
+  }
+
+  void setTestClipboard(resp_https_t response, req_https_t request) {
+    nlohmann::json body;
+    if (!test_route_request(response, request, body, true)) {
+      return;
+    }
+    test_host::set_clipboard(body.value("text", ""));
+    send_response(response, nlohmann::json {{"status", true}});
+  }
+
+  /**
    * @brief Start the HTTPS server.
    */
   void start() {
@@ -2890,6 +3000,11 @@ namespace confighttp {
     server.resource["^/api/pin$"]["POST"] = savePin;
     if (test_pin_route_enabled()) {
       server.resource["^/api/test/pin$"]["POST"] = savePinTest;
+      server.resource["^/api/test/display$"]["POST"] = setTestDisplay;
+      server.resource["^/api/test/fail$"]["POST"] = setTestFailure;
+      server.resource["^/api/test/terminate$"]["POST"] = testTerminate;
+      server.resource["^/api/test/clipboard$"]["GET"] = getTestClipboard;
+      server.resource["^/api/test/clipboard$"]["POST"] = setTestClipboard;
     }
     server.resource["^/api/otp$"]["POST"] = getOTP;
     server.resource["^/api/apps$"]["GET"] = getApps;

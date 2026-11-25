@@ -1002,6 +1002,23 @@ namespace nvhttp {
     }
   }
 
+  /**
+   * @brief Test host mode: one `events.jsonl` line for a launch, resume or cancel, with the request's
+   * parameters (the input keys `rikey` / `rikeyid` left out), so a client test can check what was asked.
+   */
+  void log_test_request(const char *what, const args_t &args) {
+    if (!test_host::enabled()) {
+      return;
+    }
+    nlohmann::json params = nlohmann::json::object();
+    for (const auto &[key, value] : args) {
+      if (!boost::iequals(key, "rikey") && !boost::iequals(key, "rikeyid")) {
+        params[key] = value;
+      }
+    }
+    test_host::log("events", {{"request", what}, {"params", params}});
+  }
+
   void apply_test_host_serverinfo(pt::ptree &tree) {
     if (!test_host::enabled()) {
       return;
@@ -1541,6 +1558,7 @@ namespace nvhttp {
     });
 
     auto args = request->parse_query_string();
+    log_test_request("launch", args);
 
     auto appid_str = get_arg(args, "appid", "0");
     auto appuuid_str = get_arg(args, "appuuid", "");
@@ -1592,6 +1610,15 @@ namespace nvhttp {
       tree.put("root.<xmlattr>.status_code", 400);
       tree.put("root.<xmlattr>.status_message", "Missing a required launch parameter");
 
+      return;
+    }
+
+    // Test host mode: a launch failure the testbench asked for (POST /api/test/fail)
+    if (test_host::enabled() && test_host::take_failure("launch")) {
+      tree.put("root.resume", 0);
+      tree.put("root.<xmlattr>.status_code", 503);
+      tree.put("root.<xmlattr>.status_message", "Test host: launch failure requested");
+      tree.put("root.gamesession", 0);
       return;
     }
 
@@ -1784,6 +1811,7 @@ namespace nvhttp {
     }
 
     auto args = request->parse_query_string();
+    log_test_request("resume", args);
     if (
       args.find("rikey"s) == std::end(args) ||
       args.find("rikeyid"s) == std::end(args)
@@ -1792,6 +1820,14 @@ namespace nvhttp {
       tree.put("root.<xmlattr>.status_code", 400);
       tree.put("root.<xmlattr>.status_message", "Missing a required resume parameter");
 
+      return;
+    }
+
+    // Test host mode: a resume failure the testbench asked for (POST /api/test/fail)
+    if (test_host::enabled() && test_host::take_failure("resume")) {
+      tree.put("root.resume", 0);
+      tree.put("root.<xmlattr>.status_code", 503);
+      tree.put("root.<xmlattr>.status_message", "Test host: resume failure requested");
       return;
     }
 
@@ -1899,6 +1935,13 @@ namespace nvhttp {
 
     tree.put("root.cancel", 1);
     tree.put("root.<xmlattr>.status_code", 200);
+
+    log_test_request("cancel", request->parse_query_string());
+    // Test host mode: a refused quit the testbench asked for (POST /api/test/fail): success answered, the
+    // app left running, as a host does for a game another device started
+    if (test_host::enabled() && test_host::take_failure("cancel")) {
+      return;
+    }
 
     rtsp_stream::terminate_sessions();
 

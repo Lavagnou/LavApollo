@@ -19,7 +19,46 @@ namespace test_host {
   namespace {
     const auto started = std::chrono::steady_clock::now();
     std::mutex log_mutex;
+
+    std::mutex state_mutex;
+    std::optional<std::string> display_override;
+    std::set<std::string> failures;
+    std::string clipboard_text;
   }  // namespace
+
+  void set_display(const std::string &mode) {
+    std::lock_guard lock {state_mutex};
+    if (mode.empty()) {
+      display_override.reset();
+    } else {
+      display_override = mode;
+    }
+  }
+
+  std::optional<std::string> display() {
+    std::lock_guard lock {state_mutex};
+    return display_override;
+  }
+
+  void fail_next(const std::string &what) {
+    std::lock_guard lock {state_mutex};
+    failures.insert(what);
+  }
+
+  bool take_failure(const std::string &what) {
+    std::lock_guard lock {state_mutex};
+    return failures.erase(what) > 0;
+  }
+
+  std::string clipboard() {
+    std::lock_guard lock {state_mutex};
+    return clipboard_text;
+  }
+
+  void set_clipboard(const std::string &text) {
+    std::lock_guard lock {state_mutex};
+    clipboard_text = text;
+  }
 
   bool enabled() {
     return config::sunshine.test_host;

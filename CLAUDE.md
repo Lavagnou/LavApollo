@@ -596,11 +596,22 @@ config. Seuls le banc et les tests unitaires posent cette variable.
   `touch`, `pen`, `unicode`, `gamepad*`), `commands.jsonl` (commandes lancées par `platf::run_command` ; en mode test, le remplaçant durable `ping …` ne sert
   qu'à la commande principale d'une appli (`run_command` avec groupe de processus) ; préparation, annulation,
   détachées, d'état et de serveur reçoivent un `exit 0` immédiat),
-  `events.jsonl` (`clipboard_set`, `playnite_launch`, `playnite_stop`, `playnite_refused`, `mic_frames`).
+  `events.jsonl` (`clipboard_set`, `playnite_launch`, `playnite_stop`, `playnite_refused`, `mic_frames`, et
+  `request` : chaque `launch` / `resume` / `cancel` avec ses paramètres sous `params`, sans `rikey`/`rikeyid` ;
+  `test_display`, `test_terminate` pour les routes ci-dessous).
   Une écriture qui échoue ne lève jamais (un avertissement par fichier).
 - **`serverinfo`** porte `<LavTestHost>1</LavTestHost>` ; `POST /api/test/pin` (port web = base + 1, HTTPS
   auto-signé, 127.0.0.1 seulement : `::1` est refusé, viser l'adresse et non `localhost` ; **sans authentification**) `{"pin":"1234","name":"x"}` saisit le PIN comme l'interface
   web (`{"status":false}` s'il n'y a pas d'appairage en attente).
+- **Routes de pilotage** (mêmes règles que `/api/test/pin`, enregistrées en mode test seulement ; état en mémoire dans
+  `test_host.cpp`) : `POST /api/test/display` `{"mode":"2560x1080x60"}` change le mode annoncé par `serverinfo` en
+  pleine session (`""` = celui de la config) ; `POST /api/test/fail` `{"what":"launch"|"resume"|"cancel"}` fait échouer
+  la prochaine requête de ce type (`launch`/`resume` : 503 ; `cancel` : succès répondu mais appli laissée en marche,
+  comme pour un jeu lancé par un autre appareil) ; `POST /api/test/terminate` ferme l'appli lancée (fin de stream
+  normale côté client) ; `GET /api/test/clipboard` → `{"text":…}`, `POST {"text":…}` pose le presse-papiers du faux PC
+  (`test_host::clipboard()`, celui que lisent et écrivent `/actions/clipboard`).
+- **Commandes du PC hôte** : la clé normale `server_cmd` (JSON sur une ligne) ; en mode test elles s'exécutent comme
+  les autres commandes (`exit 0` journalisé dans `commands.jsonl`).
 - **Chemins** : `LAVAPOLLO_APPDATA` redirige tout le dossier de données (`misc.cpp`, dans tous les modes, voir plus haut) et **`ProgramData` doit
   pointer lui aussi dans le dossier du faux PC** (Playnite et NVIDIA y écrivent ; hors du dossier, les écritures
   Playnite sont refusées). Ne jamais viser `C:\ProgramData\LavApollo` ni le service réel.

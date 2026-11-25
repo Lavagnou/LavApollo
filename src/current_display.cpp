@@ -58,6 +58,12 @@ namespace current_display {
   }
 
   display_mode_t test_host_mode() {
+    // The testbench may change it mid-session (POST /api/test/display)
+    if (auto mode = test_host::display()) {
+      if (auto parsed = parse_mode(*mode)) {
+        return *parsed;
+      }
+    }
     return parse_mode(config::sunshine.test_host_display).value_or(test_host_default_mode);
   }
 

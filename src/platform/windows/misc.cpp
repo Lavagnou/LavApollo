@@ -2017,15 +2017,11 @@ namespace platf {
     return std::make_unique<win32_high_precision_timer>();
   }
 
-  // Test host mode: the fake PC's clipboard lives in memory, the real one is never touched.
-  static std::mutex test_host_clipboard_lock;
-  static std::string test_host_clipboard_text;
-
+  // Test host mode: the fake PC's clipboard lives in memory (test_host::clipboard), the real one is never touched.
   std::string
   get_clipboard() {
     if (test_host::enabled()) {
-      std::lock_guard lg {test_host_clipboard_lock};
-      return test_host_clipboard_text;
+      return test_host::clipboard();
     }
     std::string currentClipboard = to_utf8(getClipboardData());
     return currentClipboard;
@@ -2034,10 +2030,7 @@ namespace platf {
   bool
   set_clipboard(const std::string& content) {
     if (test_host::enabled()) {
-      {
-        std::lock_guard lg {test_host_clipboard_lock};
-        test_host_clipboard_text = content;
-      }
+      test_host::set_clipboard(content);
       test_host::log("events", {{"clipboard_set", content}});
       return true;
     }
