@@ -331,7 +331,9 @@ namespace config {
     bool test_host;  ///< test_host = enabled
     std::string test_host_mac;  ///< Fake MAC advertised in serverinfo (empty: the real one)
     std::string test_host_appversion;  ///< Fake appversion advertised (empty: the real one)
-    bool test_host_this_pc;  ///< Allow streaming to the PC the host runs on
+    /// Adds LavTestHostThisPc to serverinfo: the client test build then treats this host as the PC it runs on
+    /// and refuses to stream to it (to test that refusal)
+    bool test_host_this_pc;
     std::string test_host_display;  ///< Display mode serverinfo announces, `WxHxR` (empty: 1920x1080x60)
   };
 

@@ -576,9 +576,9 @@ config. Seuls le banc et les tests unitaires posent cette variable.
 | `test_host` | `enabled` active le mode |
 | `test_host_mac` | MAC annoncée par `serverinfo` (remplace aussi le `00:00:00:00:00:00` du PC non apparié) |
 | `test_host_appversion` | `appversion` annoncée (tester « hôte non pris en charge ») |
-| `test_host_this_pc` | ajoute `<LavTestHostThisPc>1</LavTestHostThisPc>` (tester « pas de stream vers soi-même ») |
+| `test_host_this_pc` | ajoute `<LavTestHostThisPc>1</LavTestHostThisPc>` : le client de test traite alors cet hôte comme le PC sur lequel il tourne et **refuse de streamer** (tester « pas de stream vers soi-même ») |
 | `test_host_display` | mode d'écran annoncé par `serverinfo` (`CurrentDisplayWidth/Height/RefreshRate`), `LARGEURxHAUTEURxFRÉQUENCE` ; défaut **`1920x1080x60`**, une valeur mal formée est ignorée (avertissement) |
-| `port`, `sunshine_name` | une instance par port (**base 40989+**, sous 49152) et par nom |
+| `port`, `sunshine_name` | une instance par port et par nom. Le client de test n'accepte que 127.0.0.1 et les ports **40000-44999**, ports dérivés compris (base − 5 … base + 21) : base entre 40005 et 44978 (le banc : 40989, 41989…). **45989 est le vrai service de ce PC**, jamais une base de test |
 
 - **Ce qui est coupé** (`test_host::skip("<quoi>")` journalise `test host: skipping <quoi>`, **au moins une
   ligne par site**, pas exactement une) : écran virtuel / SudoVDA, profils NVIDIA / NVCP / RTSS, réglages
