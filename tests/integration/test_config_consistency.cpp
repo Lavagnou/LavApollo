@@ -448,7 +448,8 @@ TEST_F(ConfigConsistencyTest, AllConfigOptionsExistInAllFiles) {
     "test_host",  // Test host mode (test_host.h): automated tests only, not a user setting
     "test_host_mac",
     "test_host_appversion",
-    "test_host_this_pc"
+    "test_host_this_pc",
+    "test_host_display"
   };
 
   std::vector<std::string> missingFromFiles;
@@ -634,7 +635,8 @@ TEST_F(ConfigConsistencyTest, TestFrameworkDetectsMissingOptions) {
     "test_host",  // Test host mode (test_host.h): automated tests only, not a user setting
     "test_host_mac",
     "test_host_appversion",
-    "test_host_this_pc"
+    "test_host_this_pc",
+    "test_host_display"
   };
 
   std::vector<std::string> missingFromFiles;

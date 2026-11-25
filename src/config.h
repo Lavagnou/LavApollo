@@ -332,6 +332,7 @@ namespace config {
     std::string test_host_mac;  ///< Fake MAC advertised in serverinfo (empty: the real one)
     std::string test_host_appversion;  ///< Fake appversion advertised (empty: the real one)
     bool test_host_this_pc;  ///< Allow streaming to the PC the host runs on
+    std::string test_host_display;  ///< Display mode serverinfo announces, `WxHxR` (empty: 1920x1080x60)
   };
 
   /**

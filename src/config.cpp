@@ -21,6 +21,7 @@
 
 // local includes
 #include "config.h"
+#include "current_display.h"
 #include "entry_handler.h"
 #include "file_handler.h"
 #include "logging.h"
@@ -640,6 +641,7 @@ namespace config {
     {},  // test_host_mac
     {},  // test_host_appversion
     false,  // test_host_this_pc
+    {},  // test_host_display
   };
 
   bool endline(char ch) {
@@ -1416,6 +1418,7 @@ namespace config {
     string_f(vars, "test_host_mac", sunshine.test_host_mac);
     string_f(vars, "test_host_appversion", sunshine.test_host_appversion);
     bool_f(vars, "test_host_this_pc", sunshine.test_host_this_pc);
+    string_f(vars, "test_host_display", sunshine.test_host_display);
 
     string_restricted_f(vars, "address_family", sunshine.address_family, {"ipv4"sv, "both"sv});
 
@@ -1502,6 +1505,11 @@ namespace config {
       frame_limiter.enable = false;
       video.encoder = "software";
       video.capture = "synthetic";
+      if (!sunshine.test_host_display.empty() && !current_display::parse_mode(sunshine.test_host_display)) {
+        BOOST_LOG(warning) << "test_host_display ["sv << sunshine.test_host_display << "] is not WIDTHxHEIGHTxREFRESH: "sv
+                           << "announcing 1920x1080x60"sv;
+        sunshine.test_host_display.clear();
+      }
     }
 
     ::video::active_hevc_mode = video.hevc_mode;

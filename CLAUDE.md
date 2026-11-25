@@ -573,6 +573,7 @@ pas dans l'interface ni dans `docs/configuration.md`. Hors `test_host = enabled`
 | `test_host_mac` | MAC annoncée par `serverinfo` (remplace aussi le `00:00:00:00:00:00` du PC non apparié) |
 | `test_host_appversion` | `appversion` annoncée (tester « hôte non pris en charge ») |
 | `test_host_this_pc` | ajoute `<LavTestHostThisPc>1</LavTestHostThisPc>` (tester « pas de stream vers soi-même ») |
+| `test_host_display` | mode d'écran annoncé par `serverinfo` (`CurrentDisplayWidth/Height/RefreshRate`), `LARGEURxHAUTEURxFRÉQUENCE` ; défaut **`1920x1080x60`**, une valeur mal formée est ignorée (avertissement) |
 | `port`, `sunshine_name` | une instance par port (**base 40989+**, sous 49152) et par nom |
 
 - **Ce qui est coupé** (`test_host::skip("<quoi>")` journalise `test host: skipping <quoi>`, **au moins une
@@ -583,7 +584,9 @@ pas dans l'interface ni dans `docs/configuration.md`. Hors `test_host = enabled`
   numérotée : 32 cellules 8×8 en bas à gauche, **repart à 0 à chaque réinitialisation de la capture**, format dans
   `src/benchmark_scene_formula.h` ; **les numéros ne sont pas consécutifs** : un créneau sauté côté hôte laisse un
   trou, une image en retard saute au créneau courant, un test client ne doit pas attendre n+1), tonalité audio synthétique, micro, manettes (ViGEm absent : avertissements
-  `Gamepad … disabled` normaux).
+  `Gamepad … disabled` normaux), et le **mode d'écran annoncé** (`current_display::captured()` rend
+  `test_host_display`, jamais l'écran réel : sinon la taille négociée par le client dépendait du moniteur du PC
+  des tests, et un changement de mode de cet écran faisait reconnecter le client de test en pleine session).
 - **Ce qui est journalisé** dans `<appdata>/testhost/*.jsonl` (`test_host::log`, champ `t` en ms depuis le
   démarrage du processus) : `input.jsonl` (`key`, `mouse_move`, `mouse_abs`, `mouse_button`, `scroll`, `hscroll`,
   `touch`, `pen`, `unicode`, `gamepad*`), `commands.jsonl` (commandes lancées par `platf::run_command` ; en mode test, le remplaçant durable `ping …` ne sert

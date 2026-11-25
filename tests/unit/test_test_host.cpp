@@ -12,6 +12,7 @@
 #include <boost/process/v1.hpp>
 
 #include <src/config.h>
+#include <src/current_display.h>
 #include <src/platform/common.h>
 #include <src/test_host.h>
 
@@ -91,6 +92,7 @@ TEST_F(TestHost, DisabledByDefault) {
   EXPECT_TRUE(config::sunshine.test_host_mac.empty());
   EXPECT_TRUE(config::sunshine.test_host_appversion.empty());
   EXPECT_FALSE(config::sunshine.test_host_this_pc);
+  EXPECT_TRUE(config::sunshine.test_host_display.empty());
 }
 
 TEST_F(TestHost, AppdataFollowsEnvironment) {
@@ -391,4 +393,37 @@ TEST_F(TestHost, InvalidUtf8InTheLogDoesNotThrowAndIsStillRecorded) {
   EXPECT_EQ(in[0]["type"], "unicode");
   EXPECT_NE(in[0]["text"].get<std::string>().find('a'), std::string::npos);
   EXPECT_EQ(read_lines(test_host::dir() / "events.jsonl").size(), 1u);
+}
+
+TEST_F(TestHost, AnnouncesAFixedDisplayModeNeverTheRealMonitor) {
+  // Default: 1920x1080@60, whatever the monitor of this PC
+  parse("test_host = enabled
+");
+  auto m = current_display::captured();
+  ASSERT_TRUE(m.has_value());
+  EXPECT_EQ(m->width, 1920);
+  EXPECT_EQ(m->height, 1080);
+  EXPECT_EQ(m->refresh, 60);
+
+  // The fixture's mode
+  parse("test_host = enabled
+test_host_display = 2560x1600x120
+");
+  EXPECT_EQ(config::sunshine.test_host_display, "2560x1600x120");
+  m = current_display::captured();
+  ASSERT_TRUE(m.has_value());
+  EXPECT_EQ(m->width, 2560);
+  EXPECT_EQ(m->height, 1600);
+  EXPECT_EQ(m->refresh, 120);
+
+  // A malformed value is dropped at parse time (warning), the default is announced
+  parse("test_host = enabled
+test_host_display = 2560x1600
+");
+  EXPECT_TRUE(config::sunshine.test_host_display.empty());
+  m = current_display::captured();
+  ASSERT_TRUE(m.has_value());
+  EXPECT_EQ(m->width, 1920);
+  EXPECT_EQ(m->height, 1080);
+  EXPECT_EQ(m->refresh, 60);
 }

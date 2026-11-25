@@ -5,10 +5,13 @@
 #include "current_display.h"
 
 #include <algorithm>
+#include <charconv>
 #include <climits>
 
+#include "config.h"
+#include "test_host.h"
+
 #ifdef _WIN32
-  #include "config.h"
   #include "platform/common.h"
   #include "platform/windows/misc.h"
   #include "platform/windows/virtual_display.h"
@@ -34,6 +37,28 @@ namespace current_display {
       refresh = std::min(refresh, m.refresh);
     }
     return display_mode_t {left, top, right - left, bottom - top, refresh};
+  }
+
+  std::optional<display_mode_t> parse_mode(std::string_view text) {
+    int values[3] {};
+    const int limits[3] {16384, 16384, 1000};
+    for (int i = 0; i < 3; ++i) {
+      const auto end = i < 2 ? text.find('x') : text.size();
+      if (end == std::string_view::npos) {
+        return std::nullopt;
+      }
+      const auto part = text.substr(0, end);
+      const auto [ptr, ec] = std::from_chars(part.data(), part.data() + part.size(), values[i]);
+      if (ec != std::errc {} || ptr != part.data() + part.size() || values[i] < 1 || values[i] > limits[i]) {
+        return std::nullopt;
+      }
+      text.remove_prefix(i < 2 ? end + 1 : end);
+    }
+    return display_mode_t {0, 0, values[0], values[1], values[2]};
+  }
+
+  display_mode_t test_host_mode() {
+    return parse_mode(config::sunshine.test_host_display).value_or(test_host_default_mode);
   }
 
 #ifdef _WIN32
@@ -72,6 +97,11 @@ namespace current_display {
   }  // namespace
 
   std::optional<display_mode_t> captured() {
+    // Test host mode: a fixed mode, never the user's real monitor (its synthetic capture has no display)
+    if (test_host::enabled()) {
+      return test_host_mode();
+    }
+
     // A running session captures its own display(s): a virtual display, or a '+'-joined layout
     if (proc::proc.running()) {
       auto display_name = proc::proc.get_display_name();
@@ -92,6 +122,9 @@ namespace current_display {
   }
 #else
   std::optional<display_mode_t> captured() {
+    if (test_host::enabled()) {
+      return test_host_mode();
+    }
     return std::nullopt;
   }
 #endif
