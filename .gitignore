@@ -68,3 +68,8 @@ venv/
 .env
 .env.*
 !.env.example
+
+# Left in the working directory by the unit tests when run from the repo root
+/test_sunshine.log
+/test_sunshine.log.backup
+/write_file_test_*.txt
