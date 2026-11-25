@@ -137,7 +137,8 @@ namespace platf {
   }
 
   bool synthetic_capture_selected() {
-    return test_host::enabled() || config::video.capture == "synthetic";
+    // Test host mode only: outside it `capture = synthetic` is not a value (and test mode forces it anyway)
+    return test_host::enabled();
   }
 
   std::shared_ptr<display_t> synthetic_display(mem_type_e hwdevice_type, const ::video::config_t &config) {

@@ -1003,7 +1003,7 @@ namespace platf {
    * @param hwdevice_type enables possible use of hardware encoder
    */
   std::shared_ptr<display_t> display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config) {
-    // Test host mode (or capture = synthetic): a generated picture, whatever the display name.
+    // Test host mode: a generated picture, whatever the display name.
     // Never a real display, not even when the synthetic one cannot be made.
     if (synthetic_capture_selected()) {
       return synthetic_display(hwdevice_type, config);

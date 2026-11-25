@@ -49,12 +49,12 @@ namespace platf {
   };
 
   /**
-   * @brief The display platf::display() returns in test host mode or with `capture = synthetic`.
+   * @brief The display platf::display() returns in test host mode.
    * @return A synthetic display for system memory, nullptr for any other memory type (a hardware
    * encoder has no synthetic source yet; the caller must not fall back to a real display).
    */
   std::shared_ptr<display_t> synthetic_display(mem_type_e hwdevice_type, const ::video::config_t &config);
 
-  /// Whether platf::display() and display_names() hand out the synthetic display.
+  /// Whether platf::display() and display_names() hand out the synthetic display: in test host mode only.
   bool synthetic_capture_selected();
 }  // namespace platf

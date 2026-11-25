@@ -182,6 +182,26 @@ TEST(Video, TestHostAdvertisesH264Only) {
 }
 
 #ifdef _WIN32
+#include <src/platform/windows/display_synthetic.h>
+
+TEST(Video, SyntheticCaptureOnlyInTestHostMode) {
+  const auto saved_test_host = config::sunshine.test_host;
+  const auto saved_capture = config::video.capture;
+
+  // `capture = synthetic` alone never replaces the real capture: only test host mode does
+  config::sunshine.test_host = false;
+  config::video.capture = "synthetic";
+  const bool without_test_host = platf::synthetic_capture_selected();
+  config::sunshine.test_host = true;
+  config::video.capture = "";
+  const bool with_test_host = platf::synthetic_capture_selected();
+
+  config::sunshine.test_host = saved_test_host;
+  config::video.capture = saved_capture;
+  EXPECT_FALSE(without_test_host);
+  EXPECT_TRUE(with_test_host);
+}
+
 TEST(Video, SyntheticCaptureIsPacedAndNumbered) {
   SyntheticScope scope;
 

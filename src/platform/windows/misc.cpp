@@ -132,7 +132,10 @@ namespace platf {
   decltype(WlanSetInterface) *fn_WlanSetInterface = nullptr;
 
   std::filesystem::path appdata() {
-    // Test host mode: an isolated data directory (the tests set this).
+    // Test host mode: an isolated data directory (the testbench and unit tests set this).
+    // Read in every mode, not only with test_host = enabled: the default config, log, apps and state paths are
+    // built from appdata() at static initialisation, and the config file that holds `test_host` is itself found
+    // here -- so this runs before any config is read. Nothing else sets it: the real service never sees it.
     if (const auto *override_dir = std::getenv("LAVAPOLLO_APPDATA"); override_dir && *override_dir) {
       return std::filesystem::path {override_dir};
     }

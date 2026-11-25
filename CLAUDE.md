@@ -565,7 +565,11 @@ contract is `docs/pyrowave-protocol.md`, shared word for word with `LavArtemis-Q
 
 LavApollo lancé comme **faux PC isolé** pour les tests automatisés des clients (banc d'essai : de vrais
 clients contre un vrai hôte, sans toucher au système). **Windows seulement**, **interne** : ces clés ne sont
-pas dans l'interface ni dans `docs/configuration.md`. Hors `test_host = enabled`, rien ne change.
+pas dans l'interface ni dans `docs/configuration.md`. Hors `test_host = enabled`, rien ne change (la capture
+synthétique n'est choisie qu'en mode test, même avec `capture = synthetic`), **sauf `LAVAPOLLO_APPDATA`**, lu dans
+tous les modes : les chemins par défaut (config, journal, applis, état) sont calculés depuis `appdata()` à
+l'initialisation statique et le fichier de config qui porte `test_host` s'y trouve, donc avant toute lecture de la
+config. Seuls le banc et les tests unitaires posent cette variable.
 
 | Clé | Effet |
 |---|---|
@@ -597,7 +601,7 @@ pas dans l'interface ni dans `docs/configuration.md`. Hors `test_host = enabled`
 - **`serverinfo`** porte `<LavTestHost>1</LavTestHost>` ; `POST /api/test/pin` (port web = base + 1, HTTPS
   auto-signé, 127.0.0.1 seulement : `::1` est refusé, viser l'adresse et non `localhost` ; **sans authentification**) `{"pin":"1234","name":"x"}` saisit le PIN comme l'interface
   web (`{"status":false}` s'il n'y a pas d'appairage en attente).
-- **Chemins** : `LAVAPOLLO_APPDATA` redirige tout le dossier de données (`misc.cpp`) et **`ProgramData` doit
+- **Chemins** : `LAVAPOLLO_APPDATA` redirige tout le dossier de données (`misc.cpp`, dans tous les modes, voir plus haut) et **`ProgramData` doit
   pointer lui aussi dans le dossier du faux PC** (Playnite et NVIDIA y écrivent ; hors du dossier, les écritures
   Playnite sont refusées). Ne jamais viser `C:\ProgramData\LavApollo` ni le service réel.
 
