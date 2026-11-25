@@ -53,8 +53,9 @@ bureau comme en Fullscreen, et démarre Playnite s'il est fermé) : pas besoin d
 
 | Fichier | Écrit par | Contenu |
 |---|---|---|
-| `library.json` | extension | `{version:1, exportedAt, games:[{id, name, source, platform, favorite, lastActivity, playtime, cover}]}` — jeux **installés et non masqués** ; `cover` = nom du PNG dans `covers\` ou vide |
+| `library.json` | extension | `{version:1, exportedAt, games:[{id, name, source, platform, favorite, lastActivity, playtime, installed, cover, background}]}` — jeux **non masqués**, installés ou non depuis l'extension 1.1.0 (`installed` absent = installé, ce qu'écrivait la 1.0.x) ; `cover` = nom du PNG dans `covers\` ou vide ; `background` = nom du JPEG dans `backgrounds\` ou vide |
 | `covers\<id>.png` | extension | jaquette convertie en PNG 600×900 max (LavApollo n'accepte que le PNG) |
+| `backgrounds\<id>.jpg` | extension (1.1.0) | image de fond du jeu, JPEG 1920×1080 max |
 | `state.json` | extension | `{version:1, playniteRunning, mode:"desktop"|"fullscreen", pid, game:{id,name,startedAt,pid}|null, updatedAt}` |
 | `commands\stop-<n>.json` | LavApollo | `{action:"stop-game", gameId}` ; l'extension le traite puis le supprime |
 
@@ -108,3 +109,10 @@ bureau comme en Fullscreen, et démarre Playnite s'il est fermé) : pas besoin d
 Après les applis de l'utilisateur, **le plus récemment joué d'abord** (tri « Activité récente » de
 Playnite, `lastActivity` de `library.json`, demandé par l'utilisateur), jamais joués à la fin par nom.
 Les clients Dev gardent cet ordre.
+
+## Données pour les écrans du prototype (2026-11-26)
+
+Installé ou non, heures jouées, dernière activité et image de fond de chaque jeu, début de la session et du
+jeu en cours, type de PC et liaison : `docs/lavartemis-host-data.md`. Corrige aussi l'ordre : il suivait la
+liste d'applis, reconstruite seulement quand rien ne tourne, donc figée tant que Playnite Fullscreen restait
+lancé ; `/applist` le prend désormais dans `library.json` tel qu'il est (`playnite::library_snapshot()`).

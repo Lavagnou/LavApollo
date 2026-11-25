@@ -497,15 +497,24 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
 
 - **Playnite extension** `tools/playnite/` (C#, .NET Framework 4.6.2, `dotnet build -c Release`,
   reference assemblies from NuGet). It writes `%ProgramData%\LavApollo\playnite\library.json`
-  (installed, non-hidden games), `covers\<id>.png` (re-encoded: LavApollo only serves PNG box art),
-  and `state.json` (Playnite running, mode, running game with `starting`). It reads stop requests
+  (every non-hidden game, installed or not since 1.1.0, with `installed`, `playtime`, `lastActivity`),
+  `covers\<id>.png` (re-encoded: LavApollo only serves PNG box art), `backgrounds\<id>.jpg` (1.1.0,
+  ≤ 1920×1080) and `state.json` (Playnite running, mode, running game with `starting`, `startedAt`). It reads stop requests
   from `commands\` and kills the game's process tree. Install: copy `bin\Release\` to
   `%APPDATA%\Playnite\Extensions\LavApolloLink\`, or double-click the `.pext` (a zip of
   `LavApolloLink.dll`, `extension.yaml`, `icon.png`) attached to the 2.4.9x prereleases. Version
-  in `extension.yaml` (1.0.1: the sun-on-a-screen icon).
+  in `extension.yaml` (1.0.1: the sun-on-a-screen icon; 1.1.0: games not installed, backgrounds).
 - **Host** `src/playnite.{h,cpp}`: parsing (tested in `tests/unit/test_playnite.cpp`), stop
   requests, and `watch_t`, which ends a game app's session when its game closes (seen then gone,
-  or never seen within 120 s).
+  or never seen within 120 s; **24 h** for a game that is not installed, `install_grace`: Playnite
+  installs it instead of starting it, and the stream must stay up during the install).
+- **Data for LavArtemis Dev's prototype screens** (`docs/lavartemis-host-data.md`): per game in
+  `/applist` `PlayniteInstalled`, `PlaynitePlaytime`, `PlayniteLastActivity` (Unix s),
+  `PlayniteBackground` + `/appasset?asset=background` (404 without one); in `serverinfo`
+  `CurrentGameElapsed`, `PlayniteGameElapsed` (seconds, not dates: clocks differ), `HostFormFactor`
+  (SMBIOS chassis, `platf::chassis_form_factor()`), `HostLink` (`wired`/`wifi`, the interface toward
+  this client). Latency is measured by the clients (TCP connect), nothing here. Test host:
+  `test_host_form_factor`, `test_host_link`.
 - `proc::parse()` appends one app per game after the user's apps: uuid = Playnite id (upper case),
   no `cmd`, `detached` = `playnite://playnite/start/<id>`, display settings copied from the user's
   Playnite app. **Never written to `apps.json`**; an `apps.json` app with the same uuid wins.
@@ -516,8 +525,9 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
   resume: the stream goes on.
 - `/applist` lists the games **only with `playnite=1`** (sent by LavArtemis Dev), with
   `IsPlayniteGame=1`, and flags the front end `IsPlayniteHost=1`. Games come **most recently played
-  first** (`playnite::sort_recent_first()`, `lastActivity` of library.json, never played last by
-  name): the clients keep that order. `/appasset` answers **404 for a game without a cover**
+  first** (`playnite::sort_recent_first()`, `lastActivity` of library.json parsed as a date, never
+  played last by name), in the order of **`playnite::library_snapshot()`**, the library as it is now
+  (`order_playnite_games()`), not of the app list; the clients also sort on `PlayniteLastActivity`. `/appasset` answers **404 for a game without a cover**
   (`is_coverless_playnite_game()`) instead of the generic `box.png`, so the clients show its name. `serverinfo` adds
   `PlayniteGameName`/`PlayniteGameUuid`/`PlayniteHostRunning` when the extension is installed.
 - `/playnite-quit-game` ("Quitter le jeu" in the clients' in-game menu): asks the extension to close
@@ -526,6 +536,10 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
 
 > ⚠️ **`proc::refresh()` replaces the whole `proc_t`**, running app included. The library is
 > re-read from `/applist` only when nothing runs (`library_changed()` then `refresh(file, false)`).
+> **Never derive the order or a game's state from the app list**: the user leaves Playnite Fullscreen
+> running, so the list can be days old. That froze the clients' « Récents » until 2026-11-26; the order,
+> installed state, play time and dates now come from `library_snapshot()` at every `/applist`. Only a game
+> added or removed waits for the next rebuild.
 
 > ⚠️ **The extension creates `commands\` itself**: the creator of a ProgramData folder owns it,
 > which is what lets the extension (user) delete the files LavApollo (SYSTEM) writes. LavApollo
@@ -578,6 +592,7 @@ config. Seuls le banc et les tests unitaires posent cette variable.
 | `test_host_appversion` | `appversion` annoncée (tester « hôte non pris en charge ») |
 | `test_host_this_pc` | ajoute `<LavTestHostThisPc>1</LavTestHostThisPc>` : le client de test traite alors cet hôte comme le PC sur lequel il tourne et **refuse de streamer** (tester « pas de stream vers soi-même ») |
 | `test_host_display` | mode d'écran annoncé par `serverinfo` (`CurrentDisplayWidth/Height/RefreshRate`), `LARGEURxHAUTEURxFRÉQUENCE` ; défaut **`1920x1080x60`**, une valeur mal formée est ignorée (avertissement) |
+| `test_host_form_factor`, `test_host_link` | `HostFormFactor` (`tower`/`mini`/`laptop`) et `HostLink` (`wired`/`wifi`) annoncés par `serverinfo` à la place de ceux de la machine ; vides = absents |
 | `port`, `sunshine_name` | une instance par port et par nom. Le client de test n'accepte que 127.0.0.1 et les ports **40000-44999**, ports dérivés compris (base − 5 … base + 21) : base entre 40005 et 44978 (le banc : 40989, 41989…). **45989 est le vrai service de ce PC**, jamais une base de test |
 
 - **Ce qui est coupé** (`test_host::skip("<quoi>")` journalise `test host: skipping <quoi>`, **au moins une
