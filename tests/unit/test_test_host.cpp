@@ -27,7 +27,7 @@ namespace {
       if (old) {
         old_env = old;
       }
-      tmp = fs::temp_directory_path() / ("lav_test_host_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + "_" + ::testing::UnitTest::GetInstance()->current_test_info()->name());
+      tmp = test_utils::scratch_dir() / ("lav_test_host_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + "_" + ::testing::UnitTest::GetInstance()->current_test_info()->name());
       fs::remove_all(tmp);
       fs::create_directories(tmp);
       _putenv_s("LAVAPOLLO_APPDATA", tmp.string().c_str());

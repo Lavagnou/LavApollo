@@ -3,6 +3,7 @@
  * @brief Common declarations.
  */
 #pragma once
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <src/globals.h>
 #include <src/logging.h>
@@ -10,6 +11,19 @@
 
 // XFail/XPass pattern implementation (similar to pytest)
 namespace test_utils {
+  /**
+   * @brief Where the tests write their files: `test_scratch` next to the test binary, made by main().
+   *
+   * Never the system temp folder: a sandboxed or locked-down session may not let us write there, and
+   * the suite then failed in the SetUp of TestHost / PlayniteTestHost (create_directories) and in
+   * WebAuthTest.LoginsSurviveARestartAndExpiredOnesDoNot (the store's file never written), whatever
+   * the order of the suites. The build tree is always ours to write.
+   */
+  inline std::filesystem::path &scratch_dir() {
+    static std::filesystem::path dir;
+    return dir;
+  }
+
   /**
    * @brief Marks a test as expected to fail
    * @param condition The condition under which the test is expected to fail

@@ -151,7 +151,7 @@ TEST(MicPassthrough, TestHostCountsFramesWithoutDevice) {
   namespace fs = std::filesystem;
   const char *old = std::getenv("LAVAPOLLO_APPDATA");
   std::string old_value = old ? old : "";
-  auto tmp = fs::temp_directory_path() / "lav_test_mic_counts";
+  auto tmp = test_utils::scratch_dir() / "lav_test_mic_counts";
   fs::remove_all(tmp);
   fs::create_directories(tmp);
   _putenv_s("LAVAPOLLO_APPDATA", tmp.string().c_str());

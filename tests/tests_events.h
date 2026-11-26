@@ -27,7 +27,11 @@ struct SunshineEventListener: testing::EmptyTestEventListener {
   }
 
   void OnTestPartResult(const testing::TestPartResult &test_part_result) override {
-    std::string file = test_part_result.file_name();
+    // No file for an exception thrown outside an assertion (in SetUp, say): gtest says
+    // "unknown file" and gives a null name, which std::string must not be built from --
+    // the listener used to abort the whole run on the first such failure.
+    const char *file_name = test_part_result.file_name();
+    std::string file = file_name ? file_name : "unknown file";
     BOOST_LOG(tests) << "At " << file << ":" << test_part_result.line_number();
 
     auto result_text = test_part_result.passed()            ? "Success" :

@@ -214,7 +214,7 @@ namespace {
       if (old) {
         old_env = old;
       }
-      tmp = std::filesystem::temp_directory_path() / ("lav_playnite_th_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+      tmp = test_utils::scratch_dir() / ("lav_playnite_th_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
       std::filesystem::remove_all(tmp);
       _putenv_s("ProgramData", (tmp / "appdata" / "pd").string().c_str());
       std::filesystem::create_directories(playnite::exchange_dir() / "commands");

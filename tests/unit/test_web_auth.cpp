@@ -19,7 +19,7 @@ namespace {
     std::filesystem::path file;
 
     fixture_t() {
-      file = std::filesystem::temp_directory_path() / ("lavapollo_auth_test_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + "_" +
+      file = test_utils::scratch_dir() / ("lavapollo_auth_test_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + "_" +
                                                        ::testing::UnitTest::GetInstance()->current_test_info()->name() + ".json");
       std::filesystem::remove(file);
     }

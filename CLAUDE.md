@@ -688,6 +688,13 @@ Known red on `master`, unrelated to this fork's work: `DisplayDeviceConfigTest/D
 Apollo, a successful `clientpairingsecret()` erases the session from nvhttp's private map and saves the
 client list, which the test cannot set up. Compare a change against this list, not against "all green".
 
+Tests that write files put them under **`test_scratch/` next to the test binary** (`test_utils::scratch_dir()`,
+made by `tests_main.cpp`), never in the system temp folder: in a session that may not write `%TEMP%` (a
+sandbox), `TestHost.*` / `PlayniteTestHost.*` failed in their `SetUp` and `WebAuthTest.LoginsSurvive…` lost its
+file, which looked like an order problem between suites. A new test that needs a folder takes it from there.
+The event listener (`tests_events.h`) accepts a failure without a file name (an exception thrown in `SetUp`):
+it used to build a `std::string` from that null name and abort the whole run.
+
 On Windows, build the tests from PowerShell or cmd, not MSYS bash: under bash `TMP` does not reach the
 compiler and gcc fails with "Cannot create temporary file in C:\Windows\". Keep the build directory path
 short too -- `ar` fails on object paths past `MAX_PATH`.
