@@ -2908,6 +2908,26 @@ namespace confighttp {
   }
 
   /**
+   * @brief Test host mode: pretend other devices stream, and that the running app started earlier
+   * (`POST /api/test/session`, `{"other_clients":1,"elapsed_offset":2520}`, see test_host::set_session()).
+   */
+  void setTestSession(resp_https_t response, req_https_t request) {
+    nlohmann::json body;
+    if (!test_route_request(response, request, body, true)) {
+      return;
+    }
+    const auto others = body.value("other_clients", 0);
+    const auto offset = body.value("elapsed_offset", 0LL);
+    if (others < 0 || others > 16 || offset < 0) {
+      bad_request(response, request, "other_clients: 0 to 16, elapsed_offset: seconds >= 0");
+      return;
+    }
+    test_host::set_session(others, offset);
+    test_host::log("events", {{"test_session", {{"other_clients", others}, {"elapsed_offset", offset}}}});
+    send_response(response, nlohmann::json {{"status", true}});
+  }
+
+  /**
    * @brief Test host mode: the host ends the stream, as when the streamed app exits on the PC
    * (`POST /api/test/terminate`): the clients get a graceful termination.
    */
@@ -3003,6 +3023,7 @@ namespace confighttp {
       server.resource["^/api/test/display$"]["POST"] = setTestDisplay;
       server.resource["^/api/test/fail$"]["POST"] = setTestFailure;
       server.resource["^/api/test/terminate$"]["POST"] = testTerminate;
+      server.resource["^/api/test/session$"]["POST"] = setTestSession;
       server.resource["^/api/test/clipboard$"]["GET"] = getTestClipboard;
       server.resource["^/api/test/clipboard$"]["POST"] = setTestClipboard;
     }

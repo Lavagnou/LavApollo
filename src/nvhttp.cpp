@@ -1296,8 +1296,17 @@ namespace nvhttp {
       // rather than a date: the client's clock needs not agree with this one.
       if (current_appid > 0) {
         if (auto elapsed = proc::proc.running_app_elapsed()) {
-          tree.put("root.CurrentGameElapsed", elapsed->count());
+          // A test host may pretend the app started earlier (« depuis 42 min » in the testbench's captures)
+          tree.put("root.CurrentGameElapsed", elapsed->count() + (test_host::enabled() ? test_host::elapsed_offset() : 0));
         }
+      }
+
+      // LavArtemis Dev: the stream sessions of other devices, « Rejoindre » rather than « Reprendre »
+      // (choice 23). The asker's own session, if it polls while streaming, does not count.
+      {
+        rtsp_stream::session_count();  // drops the sessions that ended
+        const auto asker = get_verified_cert(request);
+        tree.put("root.OtherClientsConnected", count_other_clients(rtsp_stream::get_all_session_uuids(), asker ? std::string_view {asker->uuid} : std::string_view {}, test_host::enabled() ? test_host::other_clients() : 0));
       }
 
       // LavApollo Link (Playnite), only when the extension is installed: the game running in
@@ -1452,6 +1461,17 @@ namespace nvhttp {
    */
   bool benchmark_app_listed(int appid, int current_appid, int benchmark_appid) {
     return benchmark_appid <= 0 || appid != benchmark_appid || appid == current_appid;
+  }
+
+  int count_other_clients(const std::list<std::string> &session_uuids, std::string_view requester_uuid, int fake_others) {
+    int count = std::max(0, fake_others);
+    for (const auto &uuid : session_uuids) {
+      // Every session comes from a paired client, with its certificate's UUID: one without is not the asker.
+      if (uuid.empty() || uuid != requester_uuid) {
+        count++;
+      }
+    }
+    return count;
   }
 
   /// Puts the Playnite game apps in the library's current order, in the slots they already take.

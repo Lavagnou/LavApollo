@@ -513,7 +513,8 @@ Each installed Playnite game becomes a **virtual app**, launched *inside* Playni
   `PlayniteBackground` + `/appasset?asset=background` (404 without one); in `serverinfo`
   `CurrentGameElapsed`, `PlayniteGameElapsed` (seconds, not dates: clocks differ), `HostFormFactor`
   (SMBIOS chassis, `platf::chassis_form_factor()`), `HostLink` (`wired`/`wifi`, the interface toward
-  this client). Latency is measured by the clients (TCP connect), nothing here. Test host:
+  this client), `OtherClientsConnected` (stream sessions of other paired clients than the asker: « Rejoindre »
+  instead of « Reprendre »). Latency is measured by the clients (TCP connect), nothing here. Test host:
   `test_host_form_factor`, `test_host_link`.
 - `proc::parse()` appends one app per game after the user's apps: uuid = Playnite id (upper case),
   no `cmd`, `detached` = `playnite://playnite/start/<id>`, display settings copied from the user's
@@ -625,7 +626,9 @@ config. Seuls le banc et les tests unitaires posent cette variable.
   en marche, comme pour un jeu lancé par un autre appareil ; `cancel_error` : statut 500, appli laissée en marche ;
   `clipboard` : la prochaine lecture de `/actions/clipboard` répond HTTP 500) ; `POST /api/test/terminate` ferme l'appli lancée (fin de stream
   normale côté client) ; `GET /api/test/clipboard` → `{"text":…}`, `POST {"text":…}` pose le presse-papiers du faux PC
-  (`test_host::clipboard()`, celui que lisent et écrivent `/actions/clipboard`).
+  (`test_host::clipboard()`, celui que lisent et écrivent `/actions/clipboard`) ; `POST /api/test/session`
+  `{"other_clients":1,"elapsed_offset":2520}` : `serverinfo` compte N autres appareils dans `OtherClientsConnected`
+  (« Rejoindre ») et ajoute S secondes à `CurrentGameElapsed` (« depuis 42 min » des captures du banc).
 - **Commandes du PC hôte** : la clé normale `server_cmd` (JSON sur une ligne) ; en mode test elles s'exécutent comme
   les autres commandes (`exit 0` journalisé dans `commands.jsonl`).
 - **Chemins** : `LAVAPOLLO_APPDATA` redirige tout le dossier de données (`misc.cpp`, dans tous les modes, voir plus haut) et **`ProgramData` doit

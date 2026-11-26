@@ -24,7 +24,25 @@ namespace test_host {
     std::optional<std::string> display_override;
     std::set<std::string> failures;
     std::string clipboard_text;
+    int fake_other_clients = 0;
+    long long fake_elapsed_offset = 0;
   }  // namespace
+
+  void set_session(int other_clients, long long elapsed_offset_s) {
+    std::lock_guard lock {state_mutex};
+    fake_other_clients = other_clients < 0 ? 0 : other_clients;
+    fake_elapsed_offset = elapsed_offset_s < 0 ? 0 : elapsed_offset_s;
+  }
+
+  int other_clients() {
+    std::lock_guard lock {state_mutex};
+    return fake_other_clients;
+  }
+
+  long long elapsed_offset() {
+    std::lock_guard lock {state_mutex};
+    return fake_elapsed_offset;
+  }
 
   void set_display(const std::string &mode) {
     std::lock_guard lock {state_mutex};

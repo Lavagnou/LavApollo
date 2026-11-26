@@ -75,4 +75,17 @@ namespace test_host {
    */
   std::string clipboard();
   void set_clipboard(const std::string &text);
+
+  /**
+   * @brief Fake sessions of other devices, for the client's « Rejoindre » (`POST /api/test/session`,
+   * `{"other_clients":N,"elapsed_offset":S}`): `serverinfo` adds N to `OtherClientsConnected`, and S seconds
+   * to `CurrentGameElapsed` (the running app started that much earlier). Both 0 by default.
+   */
+  void set_session(int other_clients, long long elapsed_offset_s);
+
+  /**
+   * @brief The values set by set_session().
+   */
+  int other_clients();
+  long long elapsed_offset();
 }  // namespace test_host

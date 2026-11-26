@@ -9,6 +9,7 @@
 #include <chrono>
 #include <list>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // lib includes
@@ -318,4 +319,13 @@ namespace nvhttp {
    * @return The codecs the last encoder probe found; H.264 alone in test host mode.
    */
   uint32_t server_codec_mode_support();
+
+  /**
+   * @brief How many stream sessions belong to other clients than the one asking (`serverinfo`
+   * `OtherClientsConnected`): the client says « Rejoindre » instead of « Reprendre » when it is not 0.
+   * @param session_uuids The client UUID of each stream session (`rtsp_stream::get_all_session_uuids()`).
+   * @param requester_uuid The UUID of the paired client asking.
+   * @param fake_others Sessions of other devices a test host pretends to have (test_host::other_clients()).
+   */
+  int count_other_clients(const std::list<std::string> &session_uuids, std::string_view requester_uuid, int fake_others = 0);
 }  // namespace nvhttp
