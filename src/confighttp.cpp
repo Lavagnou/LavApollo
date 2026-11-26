@@ -2891,7 +2891,7 @@ namespace confighttp {
 
   /**
    * @brief Test host mode: make the next request of a kind fail (`POST /api/test/fail`,
-   * `{"what":"launch"|"resume"|"cancel"}`, see test_host::fail_next()).
+   * `{"what":"launch"|"resume"|"cancel"|"cancel_error"|"clipboard"}`, see test_host::fail_next()).
    */
   void setTestFailure(resp_https_t response, req_https_t request) {
     nlohmann::json body;
@@ -2899,8 +2899,8 @@ namespace confighttp {
       return;
     }
     const std::string what = body.value("what", "");
-    if (what != "launch" && what != "resume" && what != "cancel") {
-      bad_request(response, request, "what: launch, resume or cancel");
+    if (what != "launch" && what != "resume" && what != "cancel" && what != "cancel_error" && what != "clipboard") {
+      bad_request(response, request, "what: launch, resume, cancel, cancel_error or clipboard");
       return;
     }
     test_host::fail_next(what);

@@ -620,9 +620,10 @@ config. Seuls le banc et les tests unitaires posent cette variable.
   web (`{"status":false}` s'il n'y a pas d'appairage en attente).
 - **Routes de pilotage** (mêmes règles que `/api/test/pin`, enregistrées en mode test seulement ; état en mémoire dans
   `test_host.cpp`) : `POST /api/test/display` `{"mode":"2560x1080x60"}` change le mode annoncé par `serverinfo` en
-  pleine session (`""` = celui de la config) ; `POST /api/test/fail` `{"what":"launch"|"resume"|"cancel"}` fait échouer
-  la prochaine requête de ce type (`launch`/`resume` : 503 ; `cancel` : succès répondu mais appli laissée en marche,
-  comme pour un jeu lancé par un autre appareil) ; `POST /api/test/terminate` ferme l'appli lancée (fin de stream
+  pleine session (`""` = celui de la config) ; `POST /api/test/fail` `{"what":"launch"|"resume"|"cancel"|"cancel_error"|"clipboard"}`
+  fait échouer la prochaine requête de ce type (`launch`/`resume` : 503 ; `cancel` : succès répondu mais appli laissée
+  en marche, comme pour un jeu lancé par un autre appareil ; `cancel_error` : statut 500, appli laissée en marche ;
+  `clipboard` : la prochaine lecture de `/actions/clipboard` répond HTTP 500) ; `POST /api/test/terminate` ferme l'appli lancée (fin de stream
   normale côté client) ; `GET /api/test/clipboard` → `{"text":…}`, `POST {"text":…}` pose le presse-papiers du faux PC
   (`test_host::clipboard()`, celui que lisent et écrivent `/actions/clipboard`).
 - **Commandes du PC hôte** : la clé normale `server_cmd` (JSON sur une ligne) ; en mode test elles s'exécutent comme

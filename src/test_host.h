@@ -59,7 +59,9 @@ namespace test_host {
 
   /**
    * @brief Make the next `what` request fail (`POST /api/test/fail`): "launch" and "resume" answer 503,
-   * "cancel" answers success but leaves the app running (what a host does when another device started it).
+   * "cancel" answers success but leaves the app running (what a host does when another device started it),
+   * "cancel_error" answers status 500 and leaves the app running, "clipboard" answers the next clipboard
+   * read with HTTP 500.
    */
   void fail_next(const std::string &what);
 

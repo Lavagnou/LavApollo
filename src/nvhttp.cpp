@@ -2025,6 +2025,13 @@ namespace nvhttp {
     if (test_host::enabled() && test_host::take_failure("cancel")) {
       return;
     }
+    // Test host mode: a quit refused with an error ("cancel_error"): status 500, the app left running
+    if (test_host::enabled() && test_host::take_failure("cancel_error")) {
+      tree.put("root.cancel", 0);
+      tree.put("root.<xmlattr>.status_code", 500);
+      tree.put("root.<xmlattr>.status_message", "Test host: quit failure requested");
+      return;
+    }
 
     rtsp_stream::terminate_sessions();
 
@@ -2180,6 +2187,13 @@ namespace nvhttp {
       BOOST_LOG(debug) << "Client ["<< named_cert_p->name << "] trying to get clipboard is not connected to a stream";
 
       response->write(SimpleWeb::StatusCode::client_error_forbidden);
+      response->close_connection_after_response = true;
+      return;
+    }
+
+    // Test host mode: a failed read the testbench asked for (POST /api/test/fail, "clipboard")
+    if (test_host::enabled() && test_host::take_failure("clipboard")) {
+      response->write(SimpleWeb::StatusCode::server_error_internal_server_error);
       response->close_connection_after_response = true;
       return;
     }
